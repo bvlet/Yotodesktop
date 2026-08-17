@@ -1,6 +1,7 @@
 node_modules/
 dist/
 release/
+_to_delete/
 .DS_Store
 *.log
 .env
