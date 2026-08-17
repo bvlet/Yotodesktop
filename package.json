@@ -28,6 +28,9 @@
   "build": {
     "appId": "co.samuelmillett.desktop-for-yoto",
     "productName": "Desktop for Yoto",
+    "directories": {
+      "output": "release"
+    },
     "asar": true,
     "asarUnpack": [
       "**/node_modules/ffmpeg-static/**",
