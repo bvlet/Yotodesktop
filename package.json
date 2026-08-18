@@ -2,6 +2,7 @@
   "name": "desktop-for-yoto",
   "version": "0.3.0",
   "description": "Drag-and-drop audio onto Yoto MYO cards.",
+  "author": "Bart <bvlet@ziggo.nl>",
   "main": "dist/main.js",
   "private": true,
   "scripts": {
