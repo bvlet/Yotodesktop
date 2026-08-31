@@ -1,5 +1,5 @@
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
-import { shell } from "electron";
+import { app, shell } from "electron";
 import http from "node:http";
 import crypto from "node:crypto";
 import { loadTokens, saveTokens, clearTokens, type StoredTokens } from "./storage.js";
@@ -15,6 +15,10 @@ const REDIRECT_URI = `http://127.0.0.1:${CALLBACK_PORT}/callback`;
 const AUTH_BASE = "https://login.yotoplay.com";
 const AUDIENCE = "https://api.yotoplay.com";
 const SCOPE = "openid profile offline_access user:content:manage user:content:view user:icons:manage family:library:manage family:library:view family:devices:view";
+// Development-only: start from onboarding while keeping the normal stored session intact.
+// Run with: npm run dev -- --forget-yoto-account
+const FORGET_YOTO_ACCOUNT_FOR_DEV = !app.isPackaged && process.argv.includes("--forget-yoto-account");
+let temporaryTokens: StoredTokens | null = null;
 
 interface TokenResponse {
   access_token: string;
@@ -71,7 +75,7 @@ async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> 
 }
 
 export async function getValidAccessToken(): Promise<string | null> {
-  const tokens = await loadTokens();
+  const tokens = FORGET_YOTO_ACCOUNT_FOR_DEV ? temporaryTokens : await loadTokens();
   if (!tokens) return null;
   if (tokens.expiresAt && Date.now() < tokens.expiresAt - 60_000) return tokens.accessToken;
   try {
@@ -81,7 +85,8 @@ export async function getValidAccessToken(): Promise<string | null> {
       refreshToken: fresh.refresh_token || tokens.refreshToken,
       expiresAt: Date.now() + fresh.expires_in * 1000,
     };
-    await saveTokens(updated);
+    if (FORGET_YOTO_ACCOUNT_FOR_DEV) temporaryTokens = updated;
+    else await saveTokens(updated);
     return updated.accessToken;
   } catch {
     return null;
@@ -92,7 +97,7 @@ function startLoginFlow(onDone: (ok: boolean, error?: string) => void): void {
   stopServer();
 
   if (!CLIENT_ID) {
-    onDone(false, "Geen YOTO_CLIENT_ID ingesteld. Registreer een client op https://dashboard.yoto.dev en start de app met YOTO_CLIENT_ID=... npm run dev");
+    onDone(false, "YOTO_CLIENT_ID is not configured. Register a client at https://dashboard.yoto.dev and start the app with YOTO_CLIENT_ID=... npm run dev");
     return;
   }
 
@@ -113,28 +118,30 @@ function startLoginFlow(onDone: (ok: boolean, error?: string) => void): void {
 
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     if (errorParam) {
-      res.end(`<html><body style="font-family:sans-serif;padding:40px"><h2>Inloggen mislukt</h2><p>${errorParam}: ${errorDescription || ""}</p><p>Je kan dit venster sluiten.</p></body></html>`);
+      res.end(`<html><body style="font-family:sans-serif;padding:40px"><h2>Sign-in failed</h2><p>${errorParam}: ${errorDescription || ""}</p><p>You can close this window.</p></body></html>`);
       stopServer();
       onDone(false, errorDescription || errorParam);
       return;
     }
     if (!code || returnedState !== state) {
-      res.end(`<html><body style="font-family:sans-serif;padding:40px"><h2>Inloggen mislukt</h2><p>Ongeldige respons.</p></body></html>`);
+      res.end(`<html><body style="font-family:sans-serif;padding:40px"><h2>Sign-in failed</h2><p>Invalid response.</p></body></html>`);
       stopServer();
       onDone(false, "invalid callback response");
       return;
     }
 
-    res.end(`<html><body style="font-family:sans-serif;padding:40px"><h2>Gelukt!</h2><p>Je bent ingelogd. Je kan dit venster sluiten en teruggaan naar Desktop for Yoto.</p></body></html>`);
+    res.end(`<html><body style="font-family:sans-serif;padding:40px"><h2>Success!</h2><p>You are signed in. You can close this window and return to Desktop for Yoto.</p></body></html>`);
     stopServer();
 
     exchangeCodeForTokens(code, codeVerifier)
       .then(async (tokens) => {
-        await saveTokens({
+        const stored: StoredTokens = {
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token,
           expiresAt: Date.now() + tokens.expires_in * 1000,
-        });
+        };
+        if (FORGET_YOTO_ACCOUNT_FOR_DEV) temporaryTokens = stored;
+        else await saveTokens(stored);
         onDone(true);
       })
       .catch((err) => onDone(false, err instanceof Error ? err.message : String(err)));
@@ -175,6 +182,7 @@ export function registerAuthHandlers(ipc: IpcMain): void {
 
   ipc.handle("auth:signout", async () => {
     stopServer();
-    await clearTokens();
+    if (FORGET_YOTO_ACCOUNT_FOR_DEV) temporaryTokens = null;
+    else await clearTokens();
   });
 }

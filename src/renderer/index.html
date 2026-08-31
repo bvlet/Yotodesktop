@@ -7,7 +7,13 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="titlebar"><span class="brand">Desktop for Yoto</span></header>
+    <header class="titlebar">
+      <div class="app-identity">
+        <img class="player-icon" src="player.png" alt="" />
+        <span class="brand">Desktop for Yoto</span>
+      </div>
+      <nav class="app-menu" id="app-menu" aria-label="Main navigation" hidden></nav>
+    </header>
     <main id="root"></main>
     <script src="renderer.js"></script>
   </body>

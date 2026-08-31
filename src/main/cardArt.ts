@@ -176,12 +176,12 @@ async function resolveImageDataUrl(input: CardArtComposeInput): Promise<string> 
   }
   if (input.imageUrl) {
     const res = await fetch(input.imageUrl);
-    if (!res.ok) throw new Error(`kon afbeelding niet ophalen (${res.status})`);
+    if (!res.ok) throw new Error(`could not fetch image (${res.status})`);
     const bytes = Buffer.from(await res.arrayBuffer());
     const mime = (res.headers.get("content-type") || "image/jpeg").split(";")[0];
     return `data:${mime};base64,${bytes.toString("base64")}`;
   }
-  throw new Error("geen afbeelding opgegeven");
+  throw new Error("no image provided");
 }
 
 // Builds the script run inside a hidden renderer window to do the actual compositing.
@@ -228,13 +228,13 @@ function buildComposeScript(params: {
   const panYIn = ${panYJson};
   const showTitle = ${showTitleJson};
 
-  if (!title) throw new Error("geen titel opgegeven");
+  if (!title) throw new Error("no title provided");
 
   function loadImage(src) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("kon afbeelding niet decoderen"));
+      img.onerror = () => reject(new Error("could not decode image"));
       img.src = src;
     });
   }
@@ -467,7 +467,7 @@ function buildComposeScript(params: {
     }
     if (extra > 0 && shown.length > 0) {
       ctx.font = "600 italic " + Math.round(trackFontSize * 0.9) + "px 'Helvetica Neue', Arial, sans-serif";
-      ctx.fillText("+" + extra + " meer…", labelX + trackPad + CARD_W * 0.022, ty);
+      ctx.fillText("+" + extra + " more…", labelX + trackPad + CARD_W * 0.022, ty);
     }
 
     // Reels
@@ -508,9 +508,9 @@ function buildComposeScript(params: {
   }
 
   // --- "photo" style ------------------------------------------------------
-  if (!imageDataUrl) throw new Error("geen afbeelding opgegeven");
+  if (!imageDataUrl) throw new Error("no image provided");
   const img = await loadImage(imageDataUrl);
-  if (!img.width || !img.height) throw new Error("afbeelding heeft geen afmetingen");
+  if (!img.width || !img.height) throw new Error("image has no dimensions");
 
   // 1) Full-bleed cover-crop background. Scaled to cover the whole card, then cropped.
   // zoom (>=1) magnifies past the minimal "cover" scale; panX/panY (-1..1, 0 = centered)
@@ -635,7 +635,7 @@ async function composeCardArt(input: CardArtComposeInput): Promise<CardArtCompos
     });
     const dataUrl = (await win.webContents.executeJavaScript(script)) as string;
     if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/png")) {
-      return { ok: false, error: "onverwacht resultaat bij het samenstellen van de afbeelding" };
+      return { ok: false, error: "unexpected result while composing the image" };
     }
     return { ok: true, dataUrl };
   } catch (err) {
@@ -647,7 +647,7 @@ async function composeCardArt(input: CardArtComposeInput): Promise<CardArtCompos
 
 function dataUrlToPngBuffer(dataUrl: string): Buffer {
   const match = /^data:image\/png;base64,(.+)$/.exec(dataUrl);
-  if (!match) throw new Error("ongeldige afbeeldingsgegevens");
+  if (!match) throw new Error("invalid image data");
   return Buffer.from(match[1], "base64");
 }
 
@@ -671,8 +671,8 @@ async function saveCardArtAs(
   const buf = dataUrlToPngBuffer(dataUrl);
   const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const opts: Electron.SaveDialogOptions = {
-    title: "Kaartafbeelding opslaan",
-    defaultPath: suggestedName || "kaartafbeelding.png",
+    title: "Save card cover",
+    defaultPath: suggestedName || "card-cover.png",
     filters: [{ name: "PNG", extensions: ["png"] }],
   };
   const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);

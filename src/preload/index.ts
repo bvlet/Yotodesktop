@@ -139,6 +139,8 @@ const api = {
       ipcRenderer.invoke("playlists:reorder", cardId, chapterKeys),
     deleteChapter: (cardId: string, chapterKey: string): Promise<void> =>
       ipcRenderer.invoke("playlists:deleteChapter", cardId, chapterKey),
+    moveChapter: (sourceCardId: string, chapterKey: string, targetCardId: string): Promise<void> =>
+      ipcRenderer.invoke("playlists:moveChapter", sourceCardId, chapterKey, targetCardId),
     setTitles: (cardId: string, updates: Array<{ chapterIndex: number; title: string }>): Promise<void> =>
       ipcRenderer.invoke("playlists:setTitles", cardId, updates),
     create: (input: {
@@ -214,6 +216,9 @@ const api = {
     resolveDropPaths: (paths: string[]): Promise<{ folderName?: string; audioFiles: string[] }> =>
       ipcRenderer.invoke("files:resolveDropPaths", paths),
     pickImage: (): Promise<string | null> => ipcRenderer.invoke("files:pickImage"),
+    pickAudioFiles: (): Promise<string[] | null> => ipcRenderer.invoke("files:pickAudioFiles"),
+    readId3Titles: (filePaths: string[]): Promise<Array<string | null>> =>
+      ipcRenderer.invoke("files:readId3Titles", filePaths),
   },
   stickers: {
     generate: (items: StickerItem[]): Promise<StickerResult> => ipcRenderer.invoke("stickers:generate", items),

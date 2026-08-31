@@ -149,7 +149,7 @@ function cacheRaw(c: Record<string, unknown>, editable: boolean) {
 async function putContent(raw: CachedRaw): Promise<unknown> {
   if (!raw.editable) {
     throw new Error(
-      "Deze playlist is niet van jouw eigen account (gedeeld via de familie-bibliotheek) — Yoto staat bewerken daarvan alleen toe voor de eigenaar zelf."
+      "This playlist belongs to another account in your family library. Only its owner can edit it."
     );
   }
   const body = {
@@ -706,5 +706,74 @@ export function registerApiHandlers(ipc: IpcMain): void {
     if (remaining.length === 0) throw new Error("can't delete the last track — delete the whole playlist instead");
     raw.content = { ...raw.content, chapters: remaining };
     await putContent(raw);
+  });
+
+  ipc.handle("playlists:moveChapter", async (_e, sourceCardId: string, chapterKey: string, targetCardId: string): Promise<void> => {
+    if (sourceCardId === targetCardId) throw new Error("choose a different playlist");
+    const source = cache.get(sourceCardId);
+    const target = cache.get(targetCardId);
+    if (!source) throw new Error("source playlist not loaded yet");
+    if (!target) throw new Error("target playlist not loaded yet");
+
+    const sourceChapters = (source.content.chapters as Array<Record<string, unknown>> | undefined) ?? [];
+    const chapterIndex = sourceChapters.findIndex((chapter) => String(chapter.key ?? "") === chapterKey);
+    if (chapterIndex < 0) throw new Error("source track not found");
+    if (sourceChapters.length <= 1) throw new Error("can't move the only track from a playlist");
+
+    const targetChapters = (target.content.chapters as Array<Record<string, unknown>> | undefined) ?? [];
+    const sourceBefore = source.content;
+    const sourceMetadataBefore = source.metadata;
+    const targetBefore = target.content;
+    const targetMetadataBefore = target.metadata;
+    const movedSourceChapter = sourceChapters[chapterIndex];
+    const destinationIndex = targetChapters.length;
+    const overlayLabel = String(destinationIndex + 1);
+    const targetKeys = new Set(targetChapters.map((chapter) => String(chapter.key ?? "")));
+    let nextKeyNumber = destinationIndex + 1;
+    let destinationKey = String(nextKeyNumber).padStart(3, "0");
+    while (targetKeys.has(destinationKey)) {
+      nextKeyNumber += 1;
+      destinationKey = String(nextKeyNumber).padStart(3, "0");
+    }
+    const movedChapter = {
+      ...movedSourceChapter,
+      key: destinationKey,
+      overlayLabel,
+      tracks: ((movedSourceChapter.tracks as Array<Record<string, unknown>> | undefined) ?? []).map((track) => ({
+        ...track,
+        uid: genUid(),
+        overlayLabel,
+      })),
+    };
+    const targetNext = [...targetChapters, movedChapter];
+    const sourceNext = sourceChapters.filter((_, index) => index !== chapterIndex);
+
+    const withMediaMetadata = (metadata: Record<string, unknown>, chapters: Array<Record<string, unknown>>) => ({
+      ...metadata,
+      media: {
+        duration: chapters.reduce((total, chapter) => total + (typeof chapter.duration === "number" ? chapter.duration : 0), 0),
+        fileSize: chapters.reduce((total, chapter) => total + (typeof chapter.fileSize === "number" ? chapter.fileSize : 0), 0),
+      },
+    });
+
+    target.content = { ...target.content, chapters: targetNext, playbackType: "linear" };
+    target.metadata = withMediaMetadata(target.metadata, targetNext);
+    try {
+      await putContent(target);
+    } catch (err) {
+      target.content = targetBefore;
+      target.metadata = targetMetadataBefore;
+      throw err;
+    }
+
+    source.content = { ...source.content, chapters: sourceNext };
+    source.metadata = withMediaMetadata(source.metadata, sourceNext);
+    try {
+      await putContent(source);
+    } catch (err) {
+      source.content = sourceBefore;
+      source.metadata = sourceMetadataBefore;
+      throw new Error(`Track was added to the target, but couldn't be removed from the source: ${(err as Error).message}`);
+    }
   });
 }

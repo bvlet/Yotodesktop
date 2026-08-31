@@ -66,6 +66,12 @@ npm install
 npm run dev
 ```
 
+To test the initial onboarding flow without deleting or changing the stored Yoto account, run:
+
+```bash
+npm run dev -- --forget-yoto-account
+```
+
 To build installers locally: `npm run dist -- --mac` (or `--win`). For Windows on a Mac you'll need `brew install --cask --no-quarantine wine-stable`. Installer output lands in `release/` (the plain esbuild output stays in `dist/`).
 
 On Windows, if `npm run dist` fails while extracting `winCodeSign` with a "required privilege is not held by the client" error, either run the terminal as Administrator once, or turn on Developer Mode (Settings → System → For developers) so your account is allowed to create the symlinks electron-builder needs — then retry.

@@ -31,6 +31,7 @@ const builds = [
 await mkdir("dist", { recursive: true });
 await copyFile("src/renderer/index.html", "dist/index.html");
 await copyFile("src/renderer/styles.css", "dist/styles.css");
+await copyFile("src/images/player.png", "dist/player.png");
 
 if (watch) {
   const ctxs = await Promise.all(builds.map((b) => esbuild.context(b)));

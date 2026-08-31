@@ -247,7 +247,7 @@ function drawPageFooter(page: PDFPage, font: PDFFont): void {
   }
 
   const label =
-    "Liniaal 0–50 mm — controleer na printen. Print op 100% / \"werkelijke grootte\" (niet \"aan pagina aanpassen\"). Stickerformaat: 53,98 × 85,6 mm (breed × hoog).";
+    "Ruler 0–50 mm — check after printing. Print at 100% / \"actual size\" (not \"fit to page\"). Card-cover size: 53.98 × 85.6 mm (width × height).";
   page.drawText(label, {
     x: rulerX,
     y: rulerY - 8,
@@ -376,7 +376,7 @@ function drawCard(
     }
   } else {
     const msgSize = 8;
-    const msg = "geen afbeelding";
+    const msg = "no image";
     const msgWidth = font.widthOfTextAtSize(msg, msgSize);
     page.drawText(msg, {
       x: cellX + (CARD_W - msgWidth) / 2,
@@ -455,13 +455,13 @@ export function registerStickerHandlers(ipc: IpcMain): void {
 
   ipc.handle("stickers:generate", async (event: IpcMainInvokeEvent, items: StickerItem[]): Promise<StickerResult> => {
     if (!Array.isArray(items) || items.length === 0) {
-      throw new Error("Geen playlists geselecteerd.");
+      throw new Error("No playlists selected.");
     }
 
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
     const opts: Electron.SaveDialogOptions = {
-      title: "Stickervel opslaan als PDF",
-      defaultPath: `yoto-stickers-${items.length}.pdf`,
+      title: "Save card covers as PDF",
+      defaultPath: `yoto-card-covers-${items.length}.pdf`,
       filters: [{ name: "PDF", extensions: ["pdf"] }],
     };
     const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);

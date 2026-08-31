@@ -1,4 +1,5 @@
 import type { YotoApi } from "../preload/index.js";
+import { ArrowLeftRight, ArrowRight, ArrowUpDown, BroomSparkles, Check, FileImage, GripVertical, HardDriveDownload, Pencil, Plus, Stars, Tags, Trash2, X, createElement as createLucideIcon } from "lucide";
 
 declare global {
   interface Window {
@@ -7,6 +8,7 @@ declare global {
 }
 
 const root = document.getElementById("root")!;
+const appMenu = document.getElementById("app-menu")!;
 
 // Fetched once at startup (see the bottom of this file) and reused by the Settings → About
 // screen, so the version shown there always matches package.json instead of a separately
@@ -59,7 +61,7 @@ interface Playlist extends PlaylistSummary {
 }
 
 type View = "loading" | "welcome" | "signing-in" | "main";
-type Tab = "playlists" | "settings";
+type Tab = "playlists" | "settings" | "print-card-covers" | "help";
 
 type AudioStage = "transcoding-local" | "hashing" | "uploading" | "transcoding-server" | "done";
 
@@ -317,74 +319,53 @@ function el(tag: string, attrs: Record<string, string> = {}, ...children: (Node 
   return node;
 }
 
-function svg(tag: string, attrs: Record<string, string> = {}, ...children: (Node | string)[]): SVGElement {
-  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-  for (const c of children) node.append(typeof c === "string" ? document.createTextNode(c) : c);
-  return node;
+function lucideIcon(
+  icon: Parameters<typeof createLucideIcon>[0],
+  className: string,
+  size = 16,
+  strokeWidth = 2
+): SVGElement {
+  return createLucideIcon(icon, {
+    class: className,
+    width: size,
+    height: size,
+    "stroke-width": strokeWidth,
+    "aria-hidden": "true",
+  });
 }
 
 function gripIcon(): SVGElement {
-  return svg(
-    "svg",
-    {
-      class: "drag-icon",
-      viewBox: "0 0 24 24",
-      width: "14",
-      height: "14",
-      fill: "currentColor",
-      "aria-hidden": "true",
-    },
-    svg("circle", { cx: "9", cy: "5", r: "1.5" }),
-    svg("circle", { cx: "15", cy: "5", r: "1.5" }),
-    svg("circle", { cx: "9", cy: "12", r: "1.5" }),
-    svg("circle", { cx: "15", cy: "12", r: "1.5" }),
-    svg("circle", { cx: "9", cy: "19", r: "1.5" }),
-    svg("circle", { cx: "15", cy: "19", r: "1.5" })
-  );
+  return lucideIcon(GripVertical, "drag-icon", 14);
 }
 
 function pencilIcon(): SVGElement {
-  return svg(
-    "svg",
-    {
-      class: "edit-icon",
-      viewBox: "0 0 24 24",
-      width: "15",
-      height: "15",
-      fill: "none",
-      stroke: "currentColor",
-      "stroke-width": "2",
-      "stroke-linecap": "round",
-      "stroke-linejoin": "round",
-      "aria-hidden": "true",
-    },
-    svg("path", { d: "M12 20h9" }),
-    svg("path", { d: "M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" })
-  );
+  return lucideIcon(Pencil, "edit-icon", 15);
 }
 
 function trashIcon(): SVGElement {
-  return svg(
-    "svg",
-    {
-      class: "delete-icon",
-      viewBox: "0 0 24 24",
-      width: "14",
-      height: "14",
-      fill: "none",
-      stroke: "currentColor",
-      "stroke-width": "2",
-      "stroke-linecap": "round",
-      "stroke-linejoin": "round",
-      "aria-hidden": "true",
-    },
-    svg("path", { d: "M3 6h18" }),
-    svg("path", { d: "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }),
-    svg("path", { d: "M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" }),
-    svg("path", { d: "M10 11v6" }),
-    svg("path", { d: "M14 11v6" })
-  );
+  return lucideIcon(Trash2, "delete-icon", 14);
+}
+
+function toolbarIcon(icon: Parameters<typeof createLucideIcon>[0]): SVGElement {
+  return lucideIcon(icon, "toolbar-icon", 16, 1.8);
+}
+
+function setToolbarButtonLabel(button: HTMLButtonElement, icon: Parameters<typeof createLucideIcon>[0], label: string): void {
+  button.replaceChildren(toolbarIcon(icon), label);
+}
+
+function coverAddHint(): HTMLElement {
+  return el("span", { class: "cover-add-hint" }, lucideIcon(Plus, "cover-add-icon", 14), "Cover");
+}
+
+function emptyTrackIcon(): SVGElement {
+  return lucideIcon(Plus, "track-add-icon", 14);
+}
+
+function modalCloseButton(close: () => void): HTMLButtonElement {
+  const button = el("button", { class: "modal-close", title: "Close" }, lucideIcon(X, "modal-close-icon", 18)) as HTMLButtonElement;
+  button.addEventListener("click", close);
+  return button;
 }
 
 function setTitleDisplay(titleEl: HTMLElement, text: string) {
@@ -414,6 +395,8 @@ function formatTotalDuration(sec?: number): string {
 
 function render() {
   root.innerHTML = "";
+  appMenu.replaceChildren();
+  appMenu.hidden = state.view !== "main";
   if (state.view === "loading") return renderLoading();
   if (state.view === "welcome") return renderWelcome();
   if (state.view === "signing-in") return renderSigningIn();
@@ -430,15 +413,25 @@ function renderWelcome() {
   root.append(
     el(
       "div",
-      { class: "center" },
-      el("h1", {}, "Desktop for Yoto"),
+      { class: "onboarding-screen" },
       el(
-        "p",
-        {},
-        "Drop a folder of audio, and we'll turn it into a playlist on your Yoto card. To start, sign in with your Yoto account."
-      ),
-      button,
-      state.error ? el("p", { class: "error" }, state.error) : null
+        "section",
+        { class: "onboarding-card" },
+        el(
+          "header",
+          { class: "onboarding-header" },
+          el("img", { class: "onboarding-player-icon", src: "player.png", alt: "" }),
+          el("h1", {}, "DESKTOP FOR YOTO")
+        ),
+        el(
+          "p",
+          { class: "onboarding-copy" },
+          el("strong", { class: "onboarding-welcome" }, "Welcome!"),
+          "To get started, connect your Yoto account. Your credentials will be encrypted and stored on this computer."
+        ),
+        button,
+        state.error ? el("p", { class: "error onboarding-error" }, state.error) : null
+      )
     )
   );
 }
@@ -470,24 +463,35 @@ function renderSigningIn() {
 }
 
 function renderMain() {
-  const tabs = el("nav", { class: "tabs" });
   const playlistsTab = el(
     "button",
-    { class: "tab" + (state.tab === "playlists" ? " active" : "") },
+    { class: "app-menu-item" + (state.tab === "playlists" ? " active" : "") },
     "Playlists"
   );
   const settingsTab = el(
     "button",
-    { class: "tab" + (state.tab === "settings" ? " active" : "") },
+    { class: "app-menu-item" + (state.tab === "settings" ? " active" : "") },
     "Settings"
+  );
+  const printCardCovers = el(
+    "button",
+    { class: "app-menu-item" + (state.tab === "print-card-covers" ? " active" : "") },
+    "Print card covers"
+  );
+  const helpTab = el(
+    "button",
+    { class: "app-menu-item" + (state.tab === "help" ? " active" : "") },
+    "Help"
   );
   playlistsTab.addEventListener("click", () => switchTab("playlists"));
   settingsTab.addEventListener("click", () => switchTab("settings"));
-  tabs.append(playlistsTab, settingsTab);
+  printCardCovers.addEventListener("click", () => switchTab("print-card-covers"));
+  helpTab.addEventListener("click", () => switchTab("help"));
+  appMenu.append(playlistsTab, printCardCovers, helpTab, settingsTab);
 
   const body = el("div", { class: "tab-body", id: "tab-body" });
 
-  root.append(el("div", { class: "shell" }, tabs, body));
+  root.append(el("div", { class: "shell" }, body));
 
   renderTabBody();
 }
@@ -503,22 +507,26 @@ function renderTabBody() {
   if (!target) return;
   target.innerHTML = "";
   if (state.tab === "playlists") renderPlaylistsTab(target);
+  else if (state.tab === "print-card-covers") renderPrintCardCoversPage(target);
+  else if (state.tab === "help") renderHelpTab(target);
   else renderSettingsTab(target);
 }
 
 function renderPlaylistsTab(target: HTMLElement) {
-  const newBtn = el("button", { class: "new-playlist-btn" }, "+ New playlist");
+  const newBtn = el("button", { class: "new-playlist-btn", title: "Create a new playlist" }, "NEW");
   newBtn.addEventListener("click", () => startOrFocusDraft());
 
-  const stickerBtn = el("button", { class: "secondary sticker-print-btn" }, "Stickers printen…");
-  stickerBtn.addEventListener("click", () => openStickerPrintModal());
+  const playlistsHeading = el(
+    "div",
+    { class: "sidebar-heading" },
+    el("h2", {}, "Your playlists"),
+    newBtn
+  );
 
   const sidebar = el(
     "aside",
     { class: "sidebar" },
-    newBtn,
-    stickerBtn,
-    el("h2", {}, "Your playlists"),
+    playlistsHeading,
     el("div", { id: "playlists" }, el("div", { class: "empty" }, "Loading…")),
     el("h2", { class: "sidebar-section-family" }, "Family playlists"),
     el("div", { id: "family-playlists" }, el("div", { class: "empty" }, "Loading…"))
@@ -598,6 +606,30 @@ function renderSettingsTab(target: HTMLElement) {
   );
 }
 
+function renderHelpTab(target: HTMLElement) {
+  target.append(
+    el(
+      "div",
+      { class: "settings help" },
+      el(
+        "section",
+        { class: "settings-section" },
+        el("h3", {}, "Frequently asked questions"),
+        el(
+          "article",
+          { class: "faq-entry" },
+          el("h4", {}, "How can I make sure my changes appear on the device?"),
+          el(
+            "p",
+            {},
+            "The player needs to fetch changes from the Yoto servers. It does this when it is plugged in (charging), not playing anything, and no Yoto app is open on a phone."
+          )
+        )
+      )
+    )
+  );
+}
+
 function renderSidebar() {
   const target = document.getElementById("playlists");
   if (!target) return;
@@ -609,7 +641,7 @@ function renderSidebar() {
       {
         class: "playlist draft" + (!state.selectedCardId ? " selected" : ""),
       },
-      el("div", { class: "playlist-cover playlist-cover-placeholder draft-cover" }, "+"),
+      el("div", { class: "playlist-cover playlist-cover-placeholder draft-cover" }, lucideIcon(Plus, "draft-add-icon", 20)),
       el(
         "div",
         { class: "playlist-title" },
@@ -648,6 +680,7 @@ function renderSidebar() {
       el("div", { class: "playlist-title" }, p.title)
     );
     row.addEventListener("click", () => selectPlaylist(p.cardId));
+    wirePlaylistDropTarget(row, p);
     target.append(row);
   }
 }
@@ -691,7 +724,7 @@ function renderDetail() {
   target.innerHTML = "";
 
   if (!state.selectedCardId) {
-    const startBtn = el("button", {}, "+ New playlist");
+    const startBtn = el("button", { class: "button-with-icon" }, lucideIcon(Plus, "button-icon", 16), "New playlist");
     startBtn.addEventListener("click", startOrFocusDraft);
     target.append(
       el(
@@ -728,27 +761,30 @@ function renderDetail() {
     : el(
         "div",
         { class: "detail-cover detail-cover-placeholder" + (editable ? " detail-cover-clickable" : "") },
-        editable ? el("span", { class: "cover-add-hint" }, "+ Cover") : ""
+        editable ? coverAddHint() : ""
       );
   if (editable) cover.addEventListener("click", () => pickAndUploadCoverForExisting(detail.cardId));
 
   let toolbar: HTMLElement;
   if (editable) {
-    const repairBtn = el("button", { class: "secondary", title: "Re-saves this playlist with the full chapter shape the Yoto player needs. Use if a playlist you published from this app won't play (cloud icon on the player)." }, "Fix on player");
+    const repairBtn = el("button", { class: "secondary", title: "Re-saves this playlist with the full chapter shape the Yoto player needs. Use if a playlist you published from this app won't play (cloud icon on the player)." }, toolbarIcon(HardDriveDownload), "Fix on player");
     repairBtn.addEventListener("click", () => repairExistingCard(detail.cardId, repairBtn as HTMLButtonElement));
-    const refreshIconsBtn = el("button", { class: "secondary", title: "AI-match every track's title against the Yoto public icon library, semantically (Wings → bird, Grow → plant). Replaces all current icons." }, "Auto-choose icons");
+    const refreshIconsBtn = el("button", { class: "secondary", title: "AI-match every track's title against the Yoto public icon library, semantically (Wings → bird, Grow → plant). Replaces all current icons." }, toolbarIcon(Stars), "Auto-choose icons");
     refreshIconsBtn.addEventListener("click", () => autoChooseIconsForPlaylist(detail.cardId, refreshIconsBtn as HTMLButtonElement));
-    const deleteBtn = el("button", { class: "secondary danger", title: "Permanently delete this playlist from your Yoto account." }, "Delete playlist");
+    const deleteBtn = el("button", { class: "secondary danger", title: "Permanently delete this playlist from your Yoto account." }, toolbarIcon(Trash2), "Delete");
     deleteBtn.addEventListener("click", () => deleteExistingPlaylist(detail.cardId, detail.title));
-    const cleanTitlesBtn = el("button", { class: "secondary", title: "Strip track numbers and recurring album/artist chunks from every track title." }, "Clean titles");
+    const cleanTitlesBtn = el("button", { class: "secondary", title: "Strip track numbers and recurring album/artist chunks from every track title." }, toolbarIcon(BroomSparkles), "Clean titles");
     cleanTitlesBtn.addEventListener("click", () => cleanTitlesForPlaylist(detail.cardId, cleanTitlesBtn as HTMLButtonElement));
+    const readId3TitlesBtn = el("button", { class: "secondary", title: "Choose the original audio files to read their ID3 title tags and preview the proposed changes." }, toolbarIcon(Tags), "Read titles from ID3 tag");
+    readId3TitlesBtn.addEventListener("click", () => openExistingId3ImportModal(detail));
     const cardArtBtn = el(
       "button",
-      { class: "secondary", title: "Zoek officiële hoesart en bak de titel erop — het resultaat wordt direct de kaartomslag." },
-      "Maak kaartafbeelding"
+      { class: "secondary", title: "Search for official cover art and add the title to it. The result becomes the card cover immediately." },
+      toolbarIcon(FileImage),
+      "Create card cover"
     );
     cardArtBtn.addEventListener("click", () => openCardArtModal(detail));
-    toolbar = el("div", { class: "detail-toolbar" }, deleteBtn, refreshIconsBtn, cleanTitlesBtn, cardArtBtn, repairBtn);
+    toolbar = el("div", { class: "detail-toolbar" }, refreshIconsBtn, cleanTitlesBtn, readId3TitlesBtn, cardArtBtn, repairBtn, deleteBtn);
   } else {
     toolbar = el(
       "div",
@@ -756,7 +792,7 @@ function renderDetail() {
       el(
         "p",
         { class: "detail-readonly-note" },
-        "Dit is een gedeelde familie-playlist — alleen de eigenaar kan 'm bewerken."
+        "This is a shared family playlist — only its owner can edit it."
       )
     );
   }
@@ -798,7 +834,7 @@ function renderDetail() {
       const isMulti = chapter.tracks.length > 1;
       const rowTitle = !isMulti && chapter.tracks[0] ? chapter.tracks[0].title || chapter.title : chapter.title;
       const rowDuration = chapter.durationSec ?? chapter.tracks.reduce((n, t) => n + (t.durationSec ?? 0), 0);
-      const handle = el("span", { class: "drag-handle", title: "Drag to reorder" }, gripIcon());
+      const handle = el("span", { class: "drag-handle", title: "Drag to reorder, or drop on another playlist to move" }, gripIcon());
       const iconSlot = editable
         ? makeIconSlot(chapter.iconUrl, () => openIconPickerForChapter(detail.cardId, i))
         : makeIconSlot(chapter.iconUrl, () => {});
@@ -822,7 +858,7 @@ function renderDetail() {
         { class: "track has-handle has-icon" + (editable ? " has-delete" : ""), "data-idx": String(i) },
         ...rowChildren
       );
-      if (reorderable) wireDragRow(row, handle);
+      if (reorderable) wireDragRow(row, handle, detail);
       else handle.classList.add("hidden");
       tracks.append(row);
       if (isMulti) {
@@ -833,7 +869,7 @@ function renderDetail() {
               "div",
               { class: "track track-sub has-handle has-icon" },
               el("span", { class: "drag-handle drag-handle-spacer" }),
-              el("span", { class: "track-icon track-icon-empty" }),
+              el("span", { class: "track-icon track-icon-empty" }, emptyTrackIcon()),
               el("span", { class: "track-num" }, `${i + 1}.${j + 1}`),
               el("span", { class: "track-title" }, t.title),
               el("span", { class: "track-duration" }, formatDuration(t.durationSec))
@@ -873,7 +909,7 @@ function renderDetail() {
         el(
           "div",
           { class: "track has-icon" + (isErr ? " row-error" : isCancelled ? " row-cancelled" : "") },
-          el("span", { class: "track-icon track-icon-empty" }),
+          el("span", { class: "track-icon track-icon-empty" }, emptyTrackIcon()),
           el("span", { class: "track-num" }, String(detail.chapters.length + j + 1).padStart(2, "0")),
           el("span", { class: "track-title" }, t.title),
           right
@@ -935,11 +971,13 @@ function renderDetail() {
 }
 
 interface DragState {
+  sourceCardId: string;
   sourceIndex: number;
   targetIndex: number | null;
   targetSide: "above" | "below" | null;
 }
 let drag: DragState | null = null;
+let movingChapter = false;
 
 function clearDropIndicators(container: HTMLElement) {
   for (const node of container.querySelectorAll(".drop-above, .drop-below")) {
@@ -947,15 +985,21 @@ function clearDropIndicators(container: HTMLElement) {
   }
 }
 
-function wireDragRow(row: HTMLElement, handle: HTMLElement) {
+function clearPlaylistDropTargets() {
+  for (const node of document.querySelectorAll(".playlist.drop-target")) {
+    node.classList.remove("drop-target");
+  }
+}
+
+function wireDragRow(row: HTMLElement, handle: HTMLElement, detail: Playlist) {
   handle.addEventListener("mousedown", () => row.setAttribute("draggable", "true"));
   handle.addEventListener("mouseup", () => row.removeAttribute("draggable"));
 
   row.addEventListener("dragstart", (ev) => {
     const idx = Number(row.dataset.idx);
-    drag = { sourceIndex: idx, targetIndex: null, targetSide: null };
+    drag = { sourceCardId: detail.cardId, sourceIndex: idx, targetIndex: null, targetSide: null };
     row.classList.add("dragging");
-    ev.dataTransfer?.setData("text/plain", String(idx));
+    ev.dataTransfer?.setData("text/plain", `${detail.cardId}:${idx}`);
     if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
   });
 
@@ -964,7 +1008,31 @@ function wireDragRow(row: HTMLElement, handle: HTMLElement) {
     row.removeAttribute("draggable");
     const container = row.parentElement;
     if (container) clearDropIndicators(container);
+    clearPlaylistDropTargets();
     drag = null;
+  });
+}
+
+function wirePlaylistDropTarget(row: HTMLElement, target: PlaylistSummary) {
+  row.addEventListener("dragover", (ev) => {
+    if (!drag || drag.sourceCardId === target.cardId || movingChapter) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+    row.classList.add("drop-target");
+  });
+
+  row.addEventListener("dragleave", (ev) => {
+    if (!row.contains(ev.relatedTarget as Node | null)) row.classList.remove("drop-target");
+  });
+
+  row.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    if (!drag || drag.sourceCardId === target.cardId || movingChapter) return;
+    const sourceCardId = drag.sourceCardId;
+    const sourceIndex = drag.sourceIndex;
+    clearPlaylistDropTargets();
+    drag = null;
+    void moveChapterToPlaylist(sourceCardId, sourceIndex, target);
   });
 }
 
@@ -1014,6 +1082,38 @@ function wireDropContainer(container: HTMLElement, detail: Playlist) {
     clearDropIndicators(container);
     finalizeReorder(detail);
   });
+}
+
+async function moveChapterToPlaylist(sourceCardId: string, sourceIndex: number, target: PlaylistSummary) {
+  if (movingChapter) return;
+  const source = state.details.get(sourceCardId);
+  const chapter = source?.chapters[sourceIndex];
+  if (!source || !chapter) return;
+  if (source.chapters.length <= 1) {
+    showDetailError("You cannot move the only track from a playlist.");
+    return;
+  }
+  if (!chapter.key) {
+    showDetailError("Cannot move this track: its chapter key is unknown. Try refreshing the playlist.");
+    return;
+  }
+
+  movingChapter = true;
+  try {
+    const targetDetail = await window.yoto.playlists.get(target.cardId);
+    if (targetDetail.editable === false) {
+      showDetailError(`Cannot move a track to "${target.title}" because you do not own that playlist.`);
+      return;
+    }
+    await window.yoto.playlists.moveChapter(sourceCardId, chapter.key, target.cardId);
+    state.details.delete(sourceCardId);
+    state.details.delete(target.cardId);
+    await selectPlaylist(sourceCardId);
+  } catch (err) {
+    showDetailError(`Couldn't move track to "${target.title}": ${(err as Error).message}`);
+  } finally {
+    movingChapter = false;
+  }
 }
 
 async function finalizeReorder(detail: Playlist) {
@@ -1072,7 +1172,7 @@ function renderDraft() {
     : el(
         "div",
         { class: "detail-cover detail-cover-placeholder detail-cover-clickable", title: "Click to add cover art" },
-        draft.coverUploading ? el("span", { class: "spinner" }) : el("span", { class: "cover-add-hint" }, "+ Cover")
+        draft.coverUploading ? el("span", { class: "spinner" }) : coverAddHint()
       );
   cover.addEventListener("click", () => pickAndUploadCoverForDraft());
 
@@ -1113,13 +1213,17 @@ function renderDraft() {
   if (!publishable) publishBtn.setAttribute("disabled", "true");
   publishBtn.addEventListener("click", publishDraft);
 
-  const autoIconsBtn = el("button", { class: "secondary", title: "Match each track's title against the Yoto public icon library and auto-assign best matches. Existing icons are kept; tracks with no good match stay blank." }, "Auto-pick icons");
+  const autoIconsBtn = el("button", { class: "secondary", title: "Match each track's title against the Yoto public icon library and auto-assign best matches. Existing icons are kept; tracks with no good match stay blank." }, toolbarIcon(Stars), "Auto-pick icons");
   autoIconsBtn.addEventListener("click", () => runAutoIconsClick(autoIconsBtn as HTMLButtonElement));
+
+  const readId3TitlesBtn = el("button", { class: "secondary", title: "Read each local audio file's ID3 title tag and preview the proposed changes." }, toolbarIcon(Tags), "Read titles from ID3 tag");
+  readId3TitlesBtn.addEventListener("click", () => readTitlesFromId3Tags(readId3TitlesBtn as HTMLButtonElement));
 
   const toolbar = el(
     "div",
     { class: "detail-toolbar" },
     inFlightCount > 0 ? cancelAllBtn : null,
+    draft.tracks.length > 0 ? readId3TitlesBtn : null,
     draft.tracks.some((t) => t.status === "done") ? autoIconsBtn : null,
     discardBtn,
     publishBtn
@@ -1167,7 +1271,7 @@ function renderDraft() {
         right = el("span", { class: "track-status" }, stageLabel(t.status));
       }
 
-      const removeBtn = el("button", { class: "row-remove", title: "Remove" }, "×");
+      const removeBtn = el("button", { class: "row-remove", title: "Remove" }, lucideIcon(X, "remove-icon", 16));
       removeBtn.addEventListener("click", () => removeDraftTrack(t.localId));
 
       const iconSlot = makeIconSlot(t.iconUrl, () => openIconPickerForDraftTrack(t.localId));
@@ -1392,14 +1496,58 @@ async function publishDraft() {
 
 async function runAutoIconsClick(btn: HTMLButtonElement) {
   btn.setAttribute("disabled", "true");
-  const original = btn.textContent || "Auto-pick icons";
-  btn.textContent = "Picking…";
+  setToolbarButtonLabel(btn, Stars, "Picking…");
   const { assigned, skipped } = await autoAssignDraftIcons({ overwrite: false });
-  btn.textContent = `Picked ${assigned}${skipped ? `, ${skipped} no match` : ""}`;
+  setToolbarButtonLabel(btn, Stars, `Picked ${assigned}${skipped ? `, ${skipped} no match` : ""}`);
   setTimeout(() => {
-    btn.textContent = original;
+    setToolbarButtonLabel(btn, Stars, "Auto-pick icons");
     btn.removeAttribute("disabled");
   }, 2200);
+}
+
+async function readTitlesFromId3Tags(btn: HTMLButtonElement) {
+  const draft = state.draft;
+  if (!draft || draft.tracks.length === 0) return;
+
+  btn.setAttribute("disabled", "true");
+  setToolbarButtonLabel(btn, Tags, "Reading ID3 tags…");
+  let id3Titles: Array<string | null>;
+  try {
+    id3Titles = await window.yoto.files.readId3Titles(draft.tracks.map((track) => track.filePath));
+  } catch (err) {
+    setToolbarButtonLabel(btn, Tags, "Read titles from ID3 tag");
+    btn.removeAttribute("disabled");
+    showDetailError(`Couldn't read ID3 titles: ${(err as Error).message}`);
+    return;
+  }
+
+  if (state.draft !== draft) return;
+  const changes = draft.tracks
+    .map((track, index) => ({ track, from: track.title, to: id3Titles[index]?.trim() }))
+    .filter((change): change is { track: DraftTrack; from: string; to: string } => Boolean(change.to && change.to !== change.from));
+
+  if (changes.length === 0) {
+    setToolbarButtonLabel(btn, Tags, "No ID3 title changes");
+    setTimeout(() => {
+      setToolbarButtonLabel(btn, Tags, "Read titles from ID3 tag");
+      btn.removeAttribute("disabled");
+    }, 1800);
+    return;
+  }
+
+  const preview = changes.slice(0, 8).map(({ from, to }) => `“${from}” → “${to}”`).join("\n");
+  const more = changes.length > 8 ? `\n… and ${changes.length - 8} more` : "";
+  const ok = confirm(
+    `Read titles from ID3 tags?\n\nThe following ${changes.length} track${changes.length === 1 ? "" : "s"} will change:\n\n${preview}${more}\n\nClick OK to apply these changes, or Cancel to keep the current titles.`
+  );
+  if (!ok) {
+    setToolbarButtonLabel(btn, Tags, "Read titles from ID3 tag");
+    btn.removeAttribute("disabled");
+    return;
+  }
+
+  for (const { track, to } of changes) track.title = to;
+  renderDetailArea();
 }
 
 async function pickAndUploadCoverForDraft() {
@@ -1453,7 +1601,7 @@ async function pickAndUploadCoverForExisting(cardId: string) {
 function makeIconSlot(iconUrl: string | undefined, onClick: () => void): HTMLElement {
   const slot = iconUrl
     ? el("img", { class: "track-icon", src: iconUrl, alt: "", title: "Click to change icon" })
-    : el("div", { class: "track-icon track-icon-empty", title: "Click to add icon" });
+    : el("div", { class: "track-icon track-icon-empty", title: "Click to add icon" }, emptyTrackIcon());
   slot.addEventListener("click", (ev) => {
     ev.stopPropagation();
     onClick();
@@ -1492,43 +1640,77 @@ function collectStickerCandidates(): StickerCandidate[] {
   return list;
 }
 
-function openStickerPrintModal() {
-  const candidates = collectStickerCandidates();
-  if (candidates.length === 0) {
-    alert("Geen playlists gevonden om stickers voor te maken.");
+function renderPrintCardCoversPage(target: HTMLElement) {
+  if (!state.summaries) {
+    target.append(
+      el(
+        "section",
+        { class: "print-covers-page" },
+        el(
+          "header",
+          { class: "print-covers-header" },
+          el("h1", {}, "Print card covers"),
+          el("p", {}, "Preparing your playlists…")
+        )
+      )
+    );
+    void loadPlaylists().then(() => {
+      if (state.tab === "print-card-covers") render();
+    });
     return;
   }
 
-  const overlay = el("div", { class: "modal-overlay" });
-  const modal = el("div", { class: "modal sticker-modal" });
-  overlay.append(modal);
-  document.body.append(overlay);
-  const close = () => overlay.remove();
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  if (!state.familySummaries) {
+    void loadFamilyPlaylists().then(() => {
+      if (state.tab === "print-card-covers") render();
+    });
+  }
+
+  const candidates = collectStickerCandidates();
+  if (candidates.length === 0) {
+    target.append(
+      el(
+        "section",
+        { class: "print-covers-page" },
+        el(
+          "header",
+          { class: "print-covers-header" },
+          el("h1", {}, "Print card covers"),
+          el("p", {}, "Choose playlists to create a printable A4 card-cover sheet.")
+        ),
+        el("div", { class: "empty print-covers-empty" }, "No playlists are available to print yet.")
+      )
+    );
+    return;
+  }
 
   const selected = new Set<string>(candidates.map((c) => c.cardId));
   // Cover picked from the online search, per cardId — overrides c.coverUrl when generating.
   const imageOverrides = new Map<string, { url: string; thumbUrl: string }>();
-  // Which row currently has its "zoek afbeelding" picker open (only one at a time).
+  // Which row currently has its image picker open (only one at a time).
   let searchOpenFor: string | null = null;
   let searchResults: StickerImageSearchResult[] = [];
   let searchLoading = false;
   let searchError: string | null = null;
 
   const header = el(
-    "div",
-    { class: "modal-header" },
-    el("h2", {}, "Stickers printen"),
-    (() => { const x = el("button", { class: "modal-close", title: "Close" }, "×"); x.addEventListener("click", close); return x; })()
+    "header",
+    { class: "print-covers-header" },
+    el("h1", {}, "Print card covers"),
+    el(
+      "p",
+      {},
+      "Choose the playlists to include on an A4 card-cover sheet. Each cover is credit-card size (53.98 × 85.6 mm), portrait, with rounded corners and sized for the NFC card."
+    )
   );
 
   const list = el("div", { class: "sticker-list" });
-  const genBtn = el("button", {}, "Genereer PDF") as HTMLButtonElement;
+  const genBtn = el("button", {}, "Generate PDF") as HTMLButtonElement;
   const status = el("div", { class: "sticker-status" });
 
   const selectAllCb = el("input", { type: "checkbox" }) as HTMLInputElement;
   selectAllCb.checked = true;
-  const selectAll = el("label", { class: "sticker-selectall" }, selectAllCb, " Alles selecteren");
+  const selectAll = el("label", { class: "sticker-selectall" }, selectAllCb, " Select all");
   selectAllCb.addEventListener("change", () => {
     selected.clear();
     if (selectAllCb.checked) candidates.forEach((c) => selected.add(c.cardId));
@@ -1536,7 +1718,7 @@ function openStickerPrintModal() {
   });
 
   function updateGenLabel() {
-    genBtn.textContent = `Genereer PDF (${selected.size})`;
+    genBtn.textContent = `Generate PDF (${selected.size})`;
   }
 
   async function openImageSearch(c: StickerCandidate) {
@@ -1547,7 +1729,7 @@ function openStickerPrintModal() {
     renderRows();
     try {
       searchResults = await window.yoto.stickers.searchImages(c.title);
-      if (searchResults.length === 0) searchError = "Niks gevonden.";
+      if (searchResults.length === 0) searchError = "No results found.";
     } catch (err) {
       searchError = (err as Error).message;
     } finally {
@@ -1582,7 +1764,7 @@ function openStickerPrintModal() {
       const searchBtn = el(
         "button",
         { class: "secondary sticker-search-btn" },
-        override || c.coverUrl ? "Andere afbeelding…" : "Zoek afbeelding…"
+        override || c.coverUrl ? "Choose another image…" : "Search for an image…"
       ) as HTMLButtonElement;
       searchBtn.type = "button";
       searchBtn.addEventListener("click", (e) => {
@@ -1601,7 +1783,7 @@ function openStickerPrintModal() {
       if (searchOpenFor === c.cardId) {
         const panel = el("div", { class: "sticker-search-panel" });
         if (searchLoading) {
-          panel.append(el("div", { class: "sticker-status" }, "Zoeken…"));
+          panel.append(el("div", { class: "sticker-status" }, "Searching…"));
         } else if (searchError) {
           panel.append(el("div", { class: "sticker-status" }, searchError));
         } else {
@@ -1624,11 +1806,11 @@ function openStickerPrintModal() {
 
   genBtn.addEventListener("click", async () => {
     if (selected.size === 0) {
-      status.textContent = "Selecteer minstens één playlist.";
+      status.textContent = "Select at least one playlist.";
       return;
     }
     genBtn.setAttribute("disabled", "true");
-    status.textContent = "PDF wordt gemaakt…";
+    status.textContent = "Creating PDF…";
     try {
       const items = candidates
         .filter((c) => selected.has(c.cardId))
@@ -1647,33 +1829,31 @@ function openStickerPrintModal() {
         status.textContent = "";
       } else if (result.ok) {
         const skippedNote = result.skipped?.length
-          ? ` (${result.skipped.length} zonder afbeelding: ${result.skipped.join(", ")})`
+          ? ` (${result.skipped.length} without an image: ${result.skipped.join(", ")})`
           : "";
-        status.textContent = `Klaar! ${result.count} sticker(s) opgeslagen${skippedNote}.`;
+        status.textContent = `Done! Saved ${result.count} card cover(s)${skippedNote}.`;
       } else {
-        status.textContent = "Er ging iets mis bij het maken van de PDF.";
+        status.textContent = "Something went wrong while creating the PDF.";
       }
     } catch (err) {
-      status.textContent = `Fout: ${(err as Error).message}`;
+      status.textContent = `Error: ${(err as Error).message}`;
     } finally {
       genBtn.removeAttribute("disabled");
     }
   });
 
-  modal.append(
-    header,
+  target.append(
     el(
-      "div",
-      { class: "modal-body sticker-modal-body" },
+      "section",
+      { class: "print-covers-page" },
+      header,
       el(
-        "p",
-        { class: "sticker-intro" },
-        "Kies welke playlists op het A4 stickervel komen. Elke sticker krijgt het formaat van een creditcard (53,98 × 85,6 mm, staand) met afgeronde hoeken, passend op de NFC-kaart. Playlists zonder eigen afbeelding kun je een online-suggestie geven."
-      ),
+      "div",
+      { class: "print-covers-content" },
       selectAll,
       list,
-      genBtn,
-      status
+      el("div", { class: "print-covers-actions" }, status, genBtn)
+      )
     )
   );
 }
@@ -1695,12 +1875,12 @@ function openCardArtModal(detail: Playlist) {
   const header = el(
     "div",
     { class: "modal-header" },
-    el("h2", {}, "Kaartafbeelding maken"),
-    (() => { const x = el("button", { class: "modal-close", title: "Close" }, "×"); x.addEventListener("click", close); return x; })()
+    el("h2", {}, "Create card cover"),
+    modalCloseButton(close)
   );
 
-  const titleInput = el("input", { class: "modal-search", type: "text", value: detail.title, placeholder: "Titel" }) as HTMLInputElement;
-  const artistInput = el("input", { class: "modal-search", type: "text", placeholder: "Artiest / verteller (optioneel)" }) as HTMLInputElement;
+  const titleInput = el("input", { class: "modal-search", type: "text", value: detail.title, placeholder: "Title" }) as HTMLInputElement;
+  const artistInput = el("input", { class: "modal-search", type: "text", placeholder: "Artist / narrator (optional)" }) as HTMLInputElement;
 
   let mode: "photo" | "illustrated" = "photo";
   let chosenSource: { imageUrl?: string; imagePath?: string } | null = null;
@@ -1724,18 +1904,18 @@ function openCardArtModal(detail: Playlist) {
 
   const preview = el("div", { class: "card-art-preview" });
   const status = el("div", { class: "sticker-status" });
-  const setBtn = el("button", {}, "Instellen als kaartomslag") as HTMLButtonElement;
+  const setBtn = el("button", {}, "Set as card cover") as HTMLButtonElement;
   setBtn.setAttribute("disabled", "true");
-  const saveBtn = el("button", { class: "secondary" }, "Opslaan als bestand…") as HTMLButtonElement;
+  const saveBtn = el("button", { class: "secondary" }, "Save as file…") as HTMLButtonElement;
   saveBtn.setAttribute("disabled", "true");
-  const refreshBtn = el("button", { class: "secondary" }, "Vernieuw voorbeeld") as HTMLButtonElement;
+  const refreshBtn = el("button", { class: "secondary" }, "Refresh preview") as HTMLButtonElement;
   refreshBtn.type = "button";
   refreshBtn.setAttribute("disabled", "true");
 
   const zoomInput = el("input", { type: "range", min: "1", max: "2.2", step: "0.05", value: String(ZOOM_DEFAULT) }) as HTMLInputElement;
   const panXInput = el("input", { type: "range", min: "-1", max: "1", step: "0.05", value: String(PAN_X_DEFAULT) }) as HTMLInputElement;
   const panYInput = el("input", { type: "range", min: "-1", max: "1", step: "0.05", value: String(PAN_Y_DEFAULT) }) as HTMLInputElement;
-  const resetAdjustBtn = el("button", { class: "secondary" }, "Centreren") as HTMLButtonElement;
+  const resetAdjustBtn = el("button", { class: "secondary" }, "Center") as HTMLButtonElement;
   resetAdjustBtn.type = "button";
   // The checkbox reads as a negative ("geen titel toevoegen"), so it has to be bound to
   // "no title" directly rather than to `showTitle` itself — otherwise checked/unchecked
@@ -1750,15 +1930,15 @@ function openCardArtModal(detail: Playlist) {
     "label",
     { class: "card-art-title-toggle" },
     noTitleCb,
-    el("span", {}, "Geen titel toevoegen (hoes is zelf al duidelijk genoeg)")
+    el("span", {}, "Do not add a title (the cover is already clear enough)")
   );
   const adjustPanel = el(
     "div",
     { class: "card-art-adjust" },
     showTitleRow,
     el("label", { class: "card-art-adjust-row" }, el("span", {}, "Zoom"), zoomInput),
-    el("label", { class: "card-art-adjust-row" }, el("span", {}, "Pan ↔"), panXInput),
-    el("label", { class: "card-art-adjust-row" }, el("span", {}, "Pan ↕"), panYInput),
+    el("label", { class: "card-art-adjust-row" }, el("span", { class: "adjust-label" }, "Pan", lucideIcon(ArrowLeftRight, "adjust-icon", 14)), panXInput),
+    el("label", { class: "card-art-adjust-row" }, el("span", { class: "adjust-label" }, "Pan", lucideIcon(ArrowUpDown, "adjust-icon", 14)), panYInput),
     resetAdjustBtn
   );
 
@@ -1802,11 +1982,11 @@ function openCardArtModal(detail: Playlist) {
   function renderPreview() {
     preview.innerHTML = "";
     if (composing) {
-      preview.append(el("div", { class: "card-art-preview-placeholder" }, el("span", { class: "spinner" }), " Bezig met samenstellen…"));
+      preview.append(el("div", { class: "card-art-preview-placeholder" }, el("span", { class: "spinner" }), " Composing…"));
     } else if (composedDataUrl) {
       preview.append(el("img", { class: "card-art-preview-img", src: composedDataUrl, alt: "" }));
     } else {
-      preview.append(el("div", { class: "card-art-preview-placeholder" }, "Kies hieronder een afbeelding of maak een illustratie."));
+      preview.append(el("div", { class: "card-art-preview-placeholder" }, "Choose an image below or create an illustration."));
     }
     const hasSource = mode === "illustrated" || !!chosenSource;
     setBtn.toggleAttribute("disabled", !composedDataUrl || composing);
@@ -1838,7 +2018,7 @@ function openCardArtModal(detail: Playlist) {
       if (result.ok && result.dataUrl) {
         composedDataUrl = result.dataUrl;
       } else {
-        status.textContent = result.error || "Kon de afbeelding niet samenstellen.";
+        status.textContent = result.error || "Could not compose the image.";
       }
     } catch (err) {
       status.textContent = (err as Error).message;
@@ -1858,7 +2038,7 @@ function openCardArtModal(detail: Playlist) {
   async function runSearch(kind: "official" | "book" | "generic") {
     const q = `${titleInput.value.trim()} ${artistInput.value.trim()}`.trim() || detail.title;
     searchResults.innerHTML = "";
-    searchResults.append(el("div", { class: "sticker-status" }, "Zoeken…"));
+    searchResults.append(el("div", { class: "sticker-status" }, "Searching…"));
     try {
       const results =
         kind === "official" ? await window.yoto.cardArt.searchOfficial(q) :
@@ -1871,8 +2051,8 @@ function openCardArtModal(detail: Playlist) {
             "div",
             { class: "sticker-status" },
             kind === "official"
-              ? "Niks gevonden — geen echte release? Probeer 'Zoek boek/luisterboek', 'Zoek algemene afbeelding', of kies een eigen bestand."
-              : "Niks gevonden — probeer andere zoekwoorden, of kies een eigen bestand."
+              ? "No results found — not an official release? Try 'Search books/audiobooks', 'Search generic images', or choose a file."
+              : "No results found — try different search terms or choose a file."
           )
         );
       }
@@ -1897,22 +2077,22 @@ function openCardArtModal(detail: Playlist) {
     }
   }
 
-  const searchBtn = el("button", { class: "secondary" }, "Zoek officiële hoes") as HTMLButtonElement;
+  const searchBtn = el("button", { class: "secondary" }, "Search official cover art") as HTMLButtonElement;
   searchBtn.type = "button";
   searchBtn.addEventListener("click", () => runSearch("official"));
 
   const bookSearchBtn = el(
     "button",
-    { class: "secondary", title: "Voor een luisterboek of prentenboek: zoekt de boekomslag via Google Books — dekt veel content die niet in Apple's muziekcatalogus staat." },
-    "Zoek boek/luisterboek"
+    { class: "secondary", title: "For audiobooks and picture books: search Google Books for a cover, including content that is not in Apple's music catalogue." },
+    "Search books/audiobooks"
   ) as HTMLButtonElement;
   bookSearchBtn.type = "button";
   bookSearchBtn.addEventListener("click", () => runSearch("book"));
 
   const genericSearchBtn = el(
     "button",
-    { class: "secondary", title: "Voor mixtapes en zelfgemaakte afspeellijsten zonder officiële release: zoek een algemene (rechtenvrije) foto in plaats daarvan." },
-    "Zoek algemene afbeelding"
+    { class: "secondary", title: "For mixtapes and homemade playlists without an official release: search for a generic royalty-free image instead." },
+    "Search generic images"
   ) as HTMLButtonElement;
   genericSearchBtn.type = "button";
   genericSearchBtn.addEventListener("click", () => runSearch("generic"));
@@ -1921,9 +2101,9 @@ function openCardArtModal(detail: Playlist) {
     "button",
     {
       class: "secondary",
-      title: "Genereer een illustratie in mixtape-stijl (gradient + cassettebandje met de echte tracklist erop) — geen foto nodig.",
+      title: "Create a mixtape-style illustration (gradient and cassette tape with the real tracklist). No photo is needed.",
     },
-    "Maak illustratie (mixtape-stijl)"
+    "Create illustration (mixtape style)"
   ) as HTMLButtonElement;
   illustratedBtn.type = "button";
   illustratedBtn.addEventListener("click", () => {
@@ -1933,7 +2113,7 @@ function openCardArtModal(detail: Playlist) {
     recompose();
   });
 
-  const pickFileBtn = el("button", { class: "secondary" }, "Kies eigen bestand…") as HTMLButtonElement;
+  const pickFileBtn = el("button", { class: "secondary" }, "Choose a file…") as HTMLButtonElement;
   pickFileBtn.type = "button";
   pickFileBtn.addEventListener("click", async () => {
     const filePath = await window.yoto.files.pickImage();
@@ -1953,9 +2133,9 @@ function openCardArtModal(detail: Playlist) {
   const urlInput = el("input", {
     class: "modal-search card-art-url-input",
     type: "text",
-    placeholder: "…of plak hier een gevonden afbeelding-URL",
+    placeholder: "…or paste the URL of an image you found here",
   }) as HTMLInputElement;
-  const useUrlBtn = el("button", { class: "secondary" }, "Gebruiken") as HTMLButtonElement;
+  const useUrlBtn = el("button", { class: "secondary" }, "Use") as HTMLButtonElement;
   useUrlBtn.type = "button";
   const useUrl = () => {
     const url = urlInput.value.trim();
@@ -1981,7 +2161,7 @@ function openCardArtModal(detail: Playlist) {
   setBtn.addEventListener("click", async () => {
     if (!composedDataUrl) return;
     setBtn.setAttribute("disabled", "true");
-    status.textContent = "Bezig met instellen als omslag…";
+    status.textContent = "Setting card cover…";
     try {
       const tempPath = await window.yoto.cardArt.writeTemp(composedDataUrl);
       const uploadResult = await window.yoto.cover.upload(tempPath);
@@ -1995,11 +2175,11 @@ function openCardArtModal(detail: Playlist) {
       }
       state.details.delete(detail.cardId);
       renderSidebar();
-      status.textContent = "Kaartomslag ingesteld!";
+      status.textContent = "Card cover set!";
       if (state.selectedCardId === detail.cardId) await selectPlaylist(detail.cardId);
       setTimeout(close, 700);
     } catch (err) {
-      status.textContent = `Fout: ${(err as Error).message}`;
+      status.textContent = `Error: ${(err as Error).message}`;
       setBtn.removeAttribute("disabled");
     }
   });
@@ -2007,10 +2187,10 @@ function openCardArtModal(detail: Playlist) {
   saveBtn.addEventListener("click", async () => {
     if (!composedDataUrl) return;
     try {
-      const result = await window.yoto.cardArt.saveAs(composedDataUrl, `${detail.title || "kaartafbeelding"}.png`);
-      if (result.ok && result.path) status.textContent = `Opgeslagen: ${result.path}`;
+      const result = await window.yoto.cardArt.saveAs(composedDataUrl, `${detail.title || "card-cover"}.png`);
+      if (result.ok && result.path) status.textContent = `Saved: ${result.path}`;
     } catch (err) {
-      status.textContent = `Fout: ${(err as Error).message}`;
+      status.textContent = `Error: ${(err as Error).message}`;
     }
   });
 
@@ -2024,10 +2204,10 @@ function openCardArtModal(detail: Playlist) {
       el(
         "p",
         { class: "sticker-intro" },
-        "Zoek officiële hoesart (Apple Music/Podcasts/Audiobooks/TV), een boekomslag voor een luisterboek, een algemene afbeelding, of maak een illustratie in mixtape-stijl met de tracklist erop. Vind je zelf iets via Google/bol.com/etc. dat onze zoekopdrachten missen? Kies een eigen bestand of plak de afbeelding-URL. Titel (en optioneel artiest) wordt op de afbeelding gebakken, op creditcardformaat (53,98 × 85,6 mm), klaar om als kaartomslag in te stellen."
+        "Search official cover art (Apple Music/Podcasts/Audiobooks/TV), a book cover for an audiobook, or a generic image; or create a mixtape-style illustration with the tracklist. Found something through Google, bol.com, or elsewhere that our searches miss? Choose a file or paste its image URL. The title and optional artist are added to the image at credit-card size (53.98 × 85.6 mm), ready to set as the card cover."
       ),
-      el("label", { class: "card-art-field" }, "Titel", titleInput),
-      el("label", { class: "card-art-field" }, "Artiest / verteller (optioneel)", artistInput),
+      el("label", { class: "card-art-field" }, "Title", titleInput),
+      el("label", { class: "card-art-field" }, "Artist / narrator (optional)", artistInput),
       el("div", { class: "card-art-source-buttons" }, searchBtn, bookSearchBtn, genericSearchBtn, illustratedBtn, pickFileBtn),
       el("div", { class: "card-art-url-row" }, urlInput, useUrlBtn),
       searchResults,
@@ -2076,7 +2256,7 @@ async function openIconPicker(onPick: (icon: PickedIcon) => void | Promise<void>
       "div",
       { class: "modal-header" },
       el("h2", {}, "Pick an icon"),
-      (() => { const x = el("button", { class: "modal-close", title: "Close" }, "×"); x.addEventListener("click", close); return x; })()
+      modalCloseButton(close)
     );
 
     const tabs = el("div", { class: "modal-tabs" });
@@ -2326,15 +2506,15 @@ async function deleteChapterFromPlaylist(detail: Playlist, index: number) {
   const chapter = detail.chapters[index];
   if (!chapter) return;
   if (detail.chapters.length <= 1) {
-    alert("Kan de laatste track op een playlist niet verwijderen.");
+    alert("You cannot remove the last track from a playlist.");
     return;
   }
   if (!chapter.key) {
-    showDetailError("Kan deze track niet verwijderen: geen chapter-key bekend (probeer de playlist te verversen).");
+    showDetailError("Cannot remove this track: its chapter key is unknown. Try refreshing the playlist.");
     return;
   }
   const label = chapter.tracks[0]?.title || chapter.title || `Track ${index + 1}`;
-  if (!confirm(`"${label}" van deze playlist verwijderen? Dit kan niet ongedaan gemaakt worden.`)) return;
+  if (!confirm(`Remove "${label}" from this playlist? This cannot be undone.`)) return;
 
   const removed = detail.chapters.splice(index, 1)[0];
   renderDetail();
@@ -2345,8 +2525,147 @@ async function deleteChapterFromPlaylist(detail: Playlist, index: number) {
   } catch (err) {
     detail.chapters.splice(index, 0, removed);
     renderDetail();
-    showDetailError(`Verwijderen mislukt: ${(err as Error).message}`);
+    showDetailError(`Remove failed: ${(err as Error).message}`);
   }
+}
+
+function openExistingId3ImportModal(detail: Playlist) {
+  const overlay = el("div", { class: "modal-overlay" });
+  const modal = el("div", { class: "modal id3-import-modal" });
+  overlay.append(modal);
+  document.body.append(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
+
+  type TitleChange = { index: number; from: string; to: string };
+  let changes: TitleChange[] = [];
+  let fileCount = 0;
+  let matchedFileCount = 0;
+  let unmatchedFileCount = 0;
+  let loading = false;
+
+  const chapterTitle = (chapter: Chapter) =>
+    chapter.tracks.length === 1 ? chapter.tracks[0]?.title || chapter.title : chapter.title;
+  const filenameKey = (filePath: string) => {
+    const filename = filePath.split(/[\\/]/).pop() ?? filePath;
+    return filename
+      .replace(/\.[^.]+$/, "")
+      .normalize("NFKD")
+      .replace(/\p{Diacritic}/gu, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  };
+
+  const selectBtn = el("button", { class: "secondary id3-import-select" }, "Select original audio files…") as HTMLButtonElement;
+  const cancelBtn = el("button", { class: "secondary" }, "Cancel") as HTMLButtonElement;
+  const saveBtn = el("button", {}, "Save changes") as HTMLButtonElement;
+  saveBtn.disabled = true;
+  const status = el("p", { class: "id3-import-status" }, "Select the original audio files to preview their ID3 title tags.");
+  const preview = el("div", { class: "id3-import-preview" });
+
+  function renderPreview() {
+    preview.innerHTML = "";
+    saveBtn.disabled = loading || changes.length === 0;
+    if (loading) {
+      status.textContent = "Reading ID3 title tags…";
+      return;
+    }
+    if (fileCount === 0) return;
+    if (changes.length === 0) {
+      status.textContent = `Matched ${matchedFileCount} of ${fileCount} selected file${fileCount === 1 ? "" : "s"} to playlist tracks. No ID3 title changes were found.${unmatchedFileCount ? ` ${unmatchedFileCount} file${unmatchedFileCount === 1 ? " was" : "s were"} not matched.` : ""}`;
+      return;
+    }
+    status.textContent = `${changes.length} title change${changes.length === 1 ? "" : "s"} ready to save. Matched ${matchedFileCount} of ${fileCount} selected file${fileCount === 1 ? "" : "s"} by filename.${unmatchedFileCount ? ` ${unmatchedFileCount} file${unmatchedFileCount === 1 ? " was" : "s were"} not matched.` : ""}`;
+    for (const { from, to } of changes) {
+      preview.append(
+        el(
+          "div",
+          { class: "id3-import-change" },
+          el("span", { class: "id3-import-from" }, from),
+          lucideIcon(ArrowRight, "id3-import-arrow", 16),
+          el("span", { class: "id3-import-to" }, to)
+        )
+      );
+    }
+  }
+
+  selectBtn.addEventListener("click", async () => {
+    const filePaths = await window.yoto.files.pickAudioFiles();
+    if (!filePaths) return;
+    fileCount = filePaths.length;
+    changes = [];
+    matchedFileCount = 0;
+    unmatchedFileCount = 0;
+    loading = true;
+    selectBtn.disabled = loading;
+    renderPreview();
+
+    try {
+      const id3Titles = await window.yoto.files.readId3Titles(filePaths);
+      const chapterIndicesByTitle = new Map<string, number[]>();
+      detail.chapters.forEach((chapter, index) => {
+        const key = filenameKey(chapterTitle(chapter));
+        if (!key) return;
+        const indices = chapterIndicesByTitle.get(key) ?? [];
+        indices.push(index);
+        chapterIndicesByTitle.set(key, indices);
+      });
+
+      const usedChapterIndices = new Set<number>();
+      filePaths.forEach((filePath, fileIndex) => {
+        const matches = chapterIndicesByTitle.get(filenameKey(filePath))?.filter((index) => !usedChapterIndices.has(index)) ?? [];
+        if (matches.length !== 1) {
+          unmatchedFileCount += 1;
+          return;
+        }
+        const index = matches[0];
+        const from = chapterTitle(detail.chapters[index]);
+        const to = id3Titles[fileIndex]?.trim();
+        usedChapterIndices.add(index);
+        matchedFileCount += 1;
+        if (to && to !== from) changes.push({ index, from, to });
+      });
+    } catch (err) {
+      fileCount = 0;
+      status.textContent = `Couldn't read ID3 titles: ${(err as Error).message}`;
+    } finally {
+      loading = false;
+      selectBtn.disabled = false;
+      renderPreview();
+    }
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    if (changes.length === 0) return;
+    saveBtn.disabled = true;
+    selectBtn.disabled = true;
+    status.textContent = "Saving title changes…";
+    try {
+      await window.yoto.playlists.setTitles(detail.cardId, changes.map(({ index, to }) => ({ chapterIndex: index, title: to })));
+      state.details.delete(detail.cardId);
+      close();
+      if (state.selectedCardId === detail.cardId) await selectPlaylist(detail.cardId);
+    } catch (err) {
+      selectBtn.disabled = false;
+      saveBtn.disabled = false;
+      status.textContent = `Couldn't update titles: ${(err as Error).message}`;
+    }
+  });
+  cancelBtn.addEventListener("click", close);
+
+  modal.append(
+    el("div", { class: "modal-header" }, el("h2", {}, "Read titles from ID3 tag"), modalCloseButton(close)),
+    el(
+      "div",
+      { class: "modal-body id3-import-modal-body" },
+      el("p", { class: "sticker-intro" }, "Choose the original audio files. Each filename is matched to the current playlist title, so additional files are safely ignored."),
+      selectBtn,
+      status,
+      preview,
+      el("div", { class: "id3-import-actions" }, cancelBtn, saveBtn)
+    )
+  );
 }
 
 async function cleanTitlesForPlaylist(cardId: string, btn: HTMLButtonElement) {
@@ -2360,31 +2679,29 @@ async function cleanTitlesForPlaylist(cardId: string, btn: HTMLButtonElement) {
     .map((title, i) => ({ chapterIndex: i, title, original: originalTitles[i] }))
     .filter((c) => c.title && c.title !== c.original);
 
-  const original = btn.textContent || "Clean titles";
-
   if (changes.length === 0) {
-    btn.textContent = "Niets op te schonen";
-    setTimeout(() => { btn.textContent = original; }, 1800);
+    setToolbarButtonLabel(btn, BroomSparkles, "Nothing to clean");
+    setTimeout(() => setToolbarButtonLabel(btn, BroomSparkles, "Clean titles"), 1800);
     return;
   }
 
   const preview = changes.slice(0, 8).map((c) => `"${c.original}" → "${c.title}"`).join("\n");
-  const more = changes.length > 8 ? `\n… en ${changes.length - 8} meer` : "";
-  const ok = confirm(`${changes.length} titel(s) aanpassen?\n\n${preview}${more}`);
+  const more = changes.length > 8 ? `\n… and ${changes.length - 8} more` : "";
+  const ok = confirm(`Update ${changes.length} title(s)?\n\n${preview}${more}`);
   if (!ok) return;
 
   btn.setAttribute("disabled", "true");
-  btn.textContent = "Opslaan…";
+  setToolbarButtonLabel(btn, BroomSparkles, "Saving…");
   try {
     await window.yoto.playlists.setTitles(cardId, changes.map(({ chapterIndex, title }) => ({ chapterIndex, title })));
     state.details.delete(cardId);
     if (state.selectedCardId === cardId) await selectPlaylist(cardId);
-    btn.textContent = `${changes.length} titel(s) bijgewerkt ✓`;
-    setTimeout(() => { btn.textContent = original; btn.removeAttribute("disabled"); }, 2400);
+    setToolbarButtonLabel(btn, Check, `Updated ${changes.length} title(s)`);
+    setTimeout(() => { setToolbarButtonLabel(btn, BroomSparkles, "Clean titles"); btn.removeAttribute("disabled"); }, 2400);
   } catch (err) {
-    btn.textContent = original;
+    setToolbarButtonLabel(btn, BroomSparkles, "Clean titles");
     btn.removeAttribute("disabled");
-    showDetailError(`Titels opschonen mislukt: ${(err as Error).message}`);
+    showDetailError(`Cleaning titles failed: ${(err as Error).message}`);
   }
 }
 
@@ -2392,7 +2709,6 @@ async function autoChooseIconsForPlaylist(cardId: string, btn: HTMLButtonElement
   const detail = state.details.get(cardId);
   if (!detail || detail.chapters.length === 0) return;
 
-  const original = btn.textContent || "Auto-choose icons";
   const ok = confirm(
     `Auto-choose icons for all ${detail.chapters.length} track${detail.chapters.length === 1 ? "" : "s"} in this playlist?\n\n` +
     `This will REPLACE every existing icon (including ones you've manually picked) with the AI's best semantic match. ` +
@@ -2401,15 +2717,15 @@ async function autoChooseIconsForPlaylist(cardId: string, btn: HTMLButtonElement
   if (!ok) return;
 
   btn.setAttribute("disabled", "true");
-  btn.textContent = "Loading icons…";
+  setToolbarButtonLabel(btn, Stars, "Loading icons…");
   await ensureIconsLoaded();
   if (!iconCache.public || iconCache.public.length === 0) {
-    btn.textContent = "No icon library";
-    setTimeout(() => { btn.textContent = original; btn.removeAttribute("disabled"); }, 1800);
+    setToolbarButtonLabel(btn, Stars, "No icon library");
+    setTimeout(() => { setToolbarButtonLabel(btn, Stars, "Auto-choose icons"); btn.removeAttribute("disabled"); }, 1800);
     return;
   }
 
-  btn.textContent = "AI matching…";
+  setToolbarButtonLabel(btn, Stars, "AI matching…");
   let results;
   try {
     results = await window.yoto.icons.semanticMatch(
@@ -2418,7 +2734,7 @@ async function autoChooseIconsForPlaylist(cardId: string, btn: HTMLButtonElement
       0.32
     );
   } catch (err) {
-    btn.textContent = original;
+    setToolbarButtonLabel(btn, Stars, "Auto-choose icons");
     btn.removeAttribute("disabled");
     showDetailError(`Auto-choose failed: ${(err as Error).message}`);
     return;
@@ -2429,21 +2745,21 @@ async function autoChooseIconsForPlaylist(cardId: string, btn: HTMLButtonElement
     .filter((x): x is { chapterIndex: number; iconRef: string } => x !== null);
 
   if (updates.length === 0) {
-    btn.textContent = "No good matches";
-    setTimeout(() => { btn.textContent = original; btn.removeAttribute("disabled"); }, 1800);
+    setToolbarButtonLabel(btn, Stars, "No good matches");
+    setTimeout(() => { setToolbarButtonLabel(btn, Stars, "Auto-choose icons"); btn.removeAttribute("disabled"); }, 1800);
     return;
   }
 
-  btn.textContent = "Saving…";
+  setToolbarButtonLabel(btn, Stars, "Saving…");
   try {
     await window.yoto.playlists.setIcons(cardId, updates);
     state.details.delete(cardId);
     const skipped = detail.chapters.length - updates.length;
-    btn.textContent = skipped > 0 ? `Updated ${updates.length}, ${skipped} blank ✓` : `Updated all ${updates.length} ✓`;
+    setToolbarButtonLabel(btn, Check, skipped > 0 ? `Updated ${updates.length}, ${skipped} blank` : `Updated all ${updates.length}`);
     if (state.selectedCardId === cardId) await selectPlaylist(cardId);
-    setTimeout(() => { btn.textContent = original; btn.removeAttribute("disabled"); }, 2400);
+    setTimeout(() => { setToolbarButtonLabel(btn, Stars, "Auto-choose icons"); btn.removeAttribute("disabled"); }, 2400);
   } catch (err) {
-    btn.textContent = original;
+    setToolbarButtonLabel(btn, Stars, "Auto-choose icons");
     btn.removeAttribute("disabled");
     showDetailError(`Auto-choose failed: ${(err as Error).message}`);
   }
@@ -2451,18 +2767,18 @@ async function autoChooseIconsForPlaylist(cardId: string, btn: HTMLButtonElement
 
 async function repairExistingCard(cardId: string, btn: HTMLButtonElement) {
   btn.setAttribute("disabled", "true");
-  btn.textContent = "Fixing…";
+  setToolbarButtonLabel(btn, HardDriveDownload, "Fixing…");
   try {
     await window.yoto.playlists.repair(cardId);
-    btn.textContent = "Fixed ✓";
+    setToolbarButtonLabel(btn, Check, "Fixed");
     state.details.delete(cardId);
     setTimeout(() => {
       btn.removeAttribute("disabled");
-      btn.textContent = "Fix on player";
+      setToolbarButtonLabel(btn, HardDriveDownload, "Fix on player");
     }, 2000);
   } catch (err) {
     btn.removeAttribute("disabled");
-    btn.textContent = "Fix on player";
+    setToolbarButtonLabel(btn, HardDriveDownload, "Fix on player");
     showDetailError(`Repair failed: ${(err as Error).message}`);
   }
 }
