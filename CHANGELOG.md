@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Updated the development and release environment to the latest stable Node.js 24 release.
 - Renamed and harmonized the app identity as Desktop for Yoto; the title-bar name is now uppercase.
 - Moved navigation into the title bar, added the player icon/identity pill, and ordered the menu as Playlists, Print card covers, Settings.
 - Reworked Print card covers into a full application page with improved layout and selection controls.
