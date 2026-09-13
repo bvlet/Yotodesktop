@@ -1,0 +1,1 @@
+Read AGENTS.md and treat its contents as if they are written in CLAUDE.md
