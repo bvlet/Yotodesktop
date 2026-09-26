@@ -135,8 +135,8 @@ const api = {
     get: (cardId: string): Promise<Playlist> => ipcRenderer.invoke("playlists:get", cardId),
     rename: (cardId: string, newTitle: string): Promise<void> =>
       ipcRenderer.invoke("playlists:rename", cardId, newTitle),
-    reorder: (cardId: string, chapterKeys: string[]): Promise<void> =>
-      ipcRenderer.invoke("playlists:reorder", cardId, chapterKeys),
+    reorder: (cardId: string, chapterOrder: number[]): Promise<void> =>
+      ipcRenderer.invoke("playlists:reorder", cardId, chapterOrder),
     deleteChapter: (cardId: string, chapterKey: string): Promise<void> =>
       ipcRenderer.invoke("playlists:deleteChapter", cardId, chapterKey),
     moveChapter: (sourceCardId: string, chapterKey: string, targetCardId: string): Promise<void> =>

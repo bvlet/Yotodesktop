@@ -828,7 +828,7 @@ function renderDetail() {
   if (detail.chapters.length === 0) {
     tracks.append(el("div", { class: "empty" }, "No tracks on this playlist."));
   } else {
-    const reorderable = editable && detail.chapters.every((ch) => !!ch.key);
+    const reorderable = editable;
     if (reorderable) wireDropContainer(tracks, detail);
     detail.chapters.forEach((chapter, i) => {
       const isMulti = chapter.tracks.length > 1;
@@ -973,16 +973,13 @@ function renderDetail() {
 interface DragState {
   sourceCardId: string;
   sourceIndex: number;
-  targetIndex: number | null;
-  targetSide: "above" | "below" | null;
+  destinationIndex: number | null;
 }
 let drag: DragState | null = null;
 let movingChapter = false;
 
 function clearDropIndicators(container: HTMLElement) {
-  for (const node of container.querySelectorAll(".drop-above, .drop-below")) {
-    node.classList.remove("drop-above", "drop-below");
-  }
+  container.querySelector(".track-insertion-line")?.classList.remove("visible");
 }
 
 function clearPlaylistDropTargets() {
@@ -997,7 +994,7 @@ function wireDragRow(row: HTMLElement, handle: HTMLElement, detail: Playlist) {
 
   row.addEventListener("dragstart", (ev) => {
     const idx = Number(row.dataset.idx);
-    drag = { sourceCardId: detail.cardId, sourceIndex: idx, targetIndex: null, targetSide: null };
+    drag = { sourceCardId: detail.cardId, sourceIndex: idx, destinationIndex: null };
     row.classList.add("dragging");
     ev.dataTransfer?.setData("text/plain", `${detail.cardId}:${idx}`);
     if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
@@ -1037,43 +1034,47 @@ function wirePlaylistDropTarget(row: HTMLElement, target: PlaylistSummary) {
 }
 
 function wireDropContainer(container: HTMLElement, detail: Playlist) {
+  const insertionLine = el("div", { class: "track-insertion-line", "aria-hidden": "true" });
+  container.append(insertionLine);
+
   container.addEventListener("dragover", (ev) => {
-    if (!drag) return;
+    if (!drag || drag.sourceCardId !== detail.cardId) return;
     ev.preventDefault();
     if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
 
     const rows = Array.from(container.querySelectorAll<HTMLElement>(".track:not(.track-sub)"));
     if (rows.length === 0) return;
 
-    let bestRow: HTMLElement | null = null;
+    let destinationIndex = 0;
+    let lineY = 0;
     let bestDist = Infinity;
-    let bestSide: "above" | "below" = "above";
-    for (const r of rows) {
-      const rect = r.getBoundingClientRect();
-      const center = rect.top + rect.height / 2;
-      const dist = Math.abs(ev.clientY - center);
+    for (let index = 0; index <= rows.length; index++) {
+      const previous = rows[index - 1];
+      const next = rows[index];
+      const previousEnd = previous?.nextElementSibling?.classList.contains("track-subs")
+        ? previous.nextElementSibling : previous;
+      const previousBottom = previousEnd?.getBoundingClientRect().bottom;
+      const nextTop = next?.getBoundingClientRect().top;
+      const boundaryY = previousBottom == null ? nextTop! - 2
+        : nextTop == null ? previousBottom + 2
+        : (previousBottom + nextTop) / 2;
+      const dist = Math.abs(ev.clientY - boundaryY);
       if (dist < bestDist) {
         bestDist = dist;
-        bestRow = r;
-        bestSide = ev.clientY < center ? "above" : "below";
+        destinationIndex = index;
+        lineY = boundaryY;
       }
     }
-    if (!bestRow) return;
 
-    const idx = Number(bestRow.dataset.idx);
-    if (drag.targetIndex === idx && drag.targetSide === bestSide) return;
-
-    clearDropIndicators(container);
     const sourceIdx = drag.sourceIndex;
-    const isAdjacentNoOp =
-      (bestSide === "above" && idx === sourceIdx + 1) ||
-      (bestSide === "below" && idx === sourceIdx - 1) ||
-      idx === sourceIdx;
-    if (!isAdjacentNoOp) {
-      bestRow.classList.add(bestSide === "above" ? "drop-above" : "drop-below");
-    }
-    drag.targetIndex = idx;
-    drag.targetSide = bestSide;
+    const isNoOp = destinationIndex === sourceIdx || destinationIndex === sourceIdx + 1;
+    insertionLine.classList.toggle("visible", !isNoOp);
+    insertionLine.style.top = `${lineY - container.getBoundingClientRect().top}px`;
+    drag.destinationIndex = isNoOp ? null : destinationIndex;
+  });
+
+  container.addEventListener("dragleave", (ev) => {
+    if (!container.contains(ev.relatedTarget as Node | null)) clearDropIndicators(container);
   });
 
   container.addEventListener("drop", (ev) => {
@@ -1117,35 +1118,29 @@ async function moveChapterToPlaylist(sourceCardId: string, sourceIndex: number, 
 }
 
 async function finalizeReorder(detail: Playlist) {
-  if (!drag || drag.targetIndex == null || drag.targetSide == null) {
+  if (!drag || drag.destinationIndex == null) {
     drag = null;
     return;
   }
-  const { sourceIndex, targetIndex, targetSide } = drag;
+  const { sourceIndex, destinationIndex } = drag;
   drag = null;
-  if (sourceIndex === targetIndex) return;
-
-  let dest = targetSide === "below" ? targetIndex + 1 : targetIndex;
+  let dest = destinationIndex;
   if (sourceIndex < dest) dest -= 1;
-  if (dest === sourceIndex) return;
 
   const previous = detail.chapters.slice();
   const next = previous.slice();
+  const chapterOrder = previous.map((_, index) => index);
   const [moved] = next.splice(sourceIndex, 1);
+  const [movedIndex] = chapterOrder.splice(sourceIndex, 1);
   next.splice(dest, 0, moved);
+  chapterOrder.splice(dest, 0, movedIndex);
   detail.chapters = next;
   renderDetail();
 
-  const keys = next.map((c) => c.key!).filter(Boolean);
-  if (keys.length !== next.length) {
-    detail.chapters = previous;
-    renderDetail();
-    showDetailError("Couldn't reorder — chapters missing keys.");
-    return;
-  }
-
   try {
-    await window.yoto.playlists.reorder(detail.cardId, keys);
+    await window.yoto.playlists.reorder(detail.cardId, chapterOrder);
+    state.details.delete(detail.cardId);
+    if (state.selectedCardId === detail.cardId) await selectPlaylist(detail.cardId);
   } catch (err) {
     detail.chapters = previous;
     renderDetail();

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Show a clear insertion line between tracks while dragging to reorder a playlist.
+- Fixed track reordering for playlists with duplicate or missing chapter keys, and prevented new key collisions when adding tracks.
+- Added a VS Code workspace and launch configuration for running the app locally.
 - Updated the development and release environment to the latest stable Node.js 24 release.
 - Renamed and harmonized the app identity as Desktop for Yoto; the title-bar name is now uppercase.
 - Moved navigation into the title bar, added the player icon/identity pill, and ordered the menu as Playlists, Print card covers, Settings.

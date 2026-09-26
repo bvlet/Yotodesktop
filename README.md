@@ -66,6 +66,8 @@ npm install
 npm run dev
 ```
 
+In VS Code, open `Yotodesktop.code-workspace` and press **F5** to run the app locally.
+
 To test the initial onboarding flow without deleting or changing the stored Yoto account, run:
 
 ```bash

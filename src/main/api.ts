@@ -4,6 +4,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { getValidAccessToken } from "./auth.js";
+import { nextUnusedChapterKey, reorderChapters } from "./chapter-order.js";
 
 function genUid(): string {
   return randomBytes(12).toString("base64url");
@@ -562,8 +563,9 @@ export function registerApiHandlers(ipc: IpcMain): void {
       if (!raw) throw new Error("playlist not loaded yet — open it first");
       const oldChapters = (raw.content.chapters as Array<Record<string, unknown>> | undefined) ?? [];
       const startIndex = oldChapters.length;
-      const appended = newTracks.map((t, i) =>
-        buildChapterShape({
+      const usedKeys = new Set(oldChapters.map((chapter) => String(chapter.key ?? "")));
+      const appended = newTracks.map((t, i) => ({
+        ...buildChapterShape({
           index: startIndex + i,
           title: t.title,
           trackUrl: `yoto:#${t.trackSha256}`,
@@ -572,8 +574,9 @@ export function registerApiHandlers(ipc: IpcMain): void {
           iconRef: t.iconRef,
           format: t.format,
           channels: t.channels,
-        })
-      );
+        }),
+        key: nextUnusedChapterKey(usedKeys, startIndex + i + 1),
+      }));
       const allChapters = [...oldChapters, ...appended];
       raw.content = { ...raw.content, chapters: allChapters, playbackType: "linear" };
       const totalDuration = allChapters.reduce((n, c) => n + ((c.duration as number | undefined) ?? 0), 0);
@@ -661,20 +664,19 @@ export function registerApiHandlers(ipc: IpcMain): void {
     await putContent(raw);
   });
 
-  ipc.handle("playlists:reorder", async (_e, cardId: string, chapterKeys: string[]): Promise<void> => {
+  ipc.handle("playlists:reorder", async (_e, cardId: string, chapterOrder: number[]): Promise<void> => {
     const raw = cache.get(cardId);
     if (!raw) throw new Error("playlist not loaded yet");
     const chapters = (raw.content.chapters as Array<Record<string, unknown>> | undefined) ?? [];
-    const byKey = new Map(chapters.map((ch) => [String(ch.key ?? ""), ch]));
-    if (byKey.size !== chapters.length) throw new Error("can't reorder: chapters missing keys");
-    const reordered = chapterKeys.map((k) => {
-      const ch = byKey.get(k);
-      if (!ch) throw new Error(`unknown chapter key: ${k}`);
-      return ch;
-    });
-    if (reordered.length !== chapters.length) throw new Error("reorder must include all chapters");
+    const reordered = reorderChapters(chapters, chapterOrder);
+    const contentBefore = raw.content;
     raw.content = { ...raw.content, chapters: reordered };
-    await putContent(raw);
+    try {
+      await putContent(raw);
+    } catch (err) {
+      raw.content = contentBefore;
+      throw err;
+    }
   });
 
   ipc.handle(
