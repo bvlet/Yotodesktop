@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.2 — 2026-10-03
+
+Thanks to Emar for this release's contributions: ID3 title reading, the chapter-reorder fix (with test coverage), and a round of UI polish.
+
 - Show a clear insertion line between tracks while dragging to reorder a playlist.
 - Fixed track reordering for playlists with duplicate or missing chapter keys, and prevented new key collisions when adding tracks.
 - Added a VS Code workspace and launch configuration for running the app locally.
