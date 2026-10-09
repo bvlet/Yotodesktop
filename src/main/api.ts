@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { getValidAccessToken } from "./auth.js";
 import { nextUnusedChapterKey, reorderChapters } from "./chapter-order.js";
+import { updateChapterTitles, type TitleUpdate } from "./track-titles.js";
 
 function genUid(): string {
   return randomBytes(12).toString("base64url");
@@ -53,6 +54,7 @@ interface CachedRaw {
 }
 
 const cache = new Map<string, CachedRaw>();
+const titleSaveQueue = new Map<string, Promise<void>>();
 
 async function authed(path: string, init: RequestInit = {}): Promise<Response> {
   const token = await getValidAccessToken();
@@ -681,21 +683,28 @@ export function registerApiHandlers(ipc: IpcMain): void {
 
   ipc.handle(
     "playlists:setTitles",
-    async (_e, cardId: string, updates: Array<{ chapterIndex: number; title: string }>): Promise<void> => {
-      const raw = cache.get(cardId);
-      if (!raw) throw new Error("playlist not loaded yet");
-      const chapters = (raw.content.chapters as Array<Record<string, unknown>> | undefined) ?? [];
-      for (const u of updates) {
-        const ch = chapters[u.chapterIndex];
-        if (!ch) continue;
-        ch.title = u.title;
-        // Single-track chapters display the TRACK's title in the UI (see rowTitle in the
-        // renderer), so that has to be kept in sync too or the cleanup won't visibly stick.
-        const tracks = (ch.tracks as Array<Record<string, unknown>> | undefined) ?? [];
-        if (tracks.length === 1) tracks[0].title = u.title;
+    async (_e, cardId: string, updates: TitleUpdate[]): Promise<void> => {
+      // Each save includes the full playlist content. Wait for earlier name edits so
+      // moving straight to the next track cannot overwrite another pending rename.
+      const pending = (titleSaveQueue.get(cardId) ?? Promise.resolve()).catch(() => {}).then(async () => {
+        const raw = cache.get(cardId);
+        if (!raw) throw new Error("playlist not loaded yet");
+        const chapters = (raw.content.chapters as Array<Record<string, unknown>> | undefined) ?? [];
+        const before = raw.content;
+        raw.content = { ...before, chapters: updateChapterTitles(chapters, updates) };
+        try {
+          await putContent(raw);
+        } catch (error) {
+          raw.content = before;
+          throw error;
+        }
+      });
+      titleSaveQueue.set(cardId, pending);
+      try {
+        await pending;
+      } finally {
+        if (titleSaveQueue.get(cardId) === pending) titleSaveQueue.delete(cardId);
       }
-      raw.content = { ...raw.content, chapters };
-      await putContent(raw);
     }
   );
 

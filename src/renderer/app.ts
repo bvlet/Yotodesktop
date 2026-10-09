@@ -375,6 +375,132 @@ function setTitleDisplay(titleEl: HTMLElement, text: string) {
   );
 }
 
+function makeTrackTitle(text: string, save?: (title: string) => void | Promise<void>): HTMLElement {
+  if (!save) return el("span", { class: "track-title" }, text);
+  const title = el("span", { class: "track-title track-title-editable" });
+  let currentTitle = text;
+  const display = () => {
+    title.classList.remove("track-title-editing");
+    title.removeAttribute("aria-busy");
+    const edit = el("button", {
+      class: "track-rename", type: "button", title: "Rename track",
+      "aria-label": `Rename track: ${currentTitle}`,
+    }, pencilIcon()) as HTMLButtonElement;
+    edit.addEventListener("click", (event) => {
+      event.stopPropagation();
+      beginEdit();
+    });
+    title.replaceChildren(el("span", { class: "track-title-text" }, currentTitle), edit);
+  };
+  const beginEdit = () => {
+    if (title.querySelector("input")) return;
+    const input = el("input", { class: "track-title-input", type: "text", "aria-label": "Track name" }) as HTMLInputElement;
+    input.value = currentTitle;
+    title.classList.add("track-title-editing");
+    title.replaceChildren(input);
+    let committed = false;
+    const commit = async () => {
+      if (committed) return;
+      committed = true;
+      const next = input.value.trim();
+      if (!next || next === currentTitle) return display();
+      input.readOnly = true;
+      title.setAttribute("aria-busy", "true");
+      title.append(el("span", { class: "track-title-saving", role: "status" }, "Saving…"));
+      try {
+        const pending = save(next);
+        if (pending) await pending;
+        currentTitle = next;
+        display();
+      } catch (error) {
+        display();
+        showDetailError(`Couldn't rename track: ${(error as Error).message}`);
+      }
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        input.blur();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (committed) return;
+        committed = true;
+        display();
+        title.querySelector<HTMLButtonElement>("button")!.focus();
+      }
+    });
+    input.focus();
+    input.select();
+  };
+  display();
+  return title;
+}
+
+async function renameTrack(detail: Playlist, chapter: Chapter, title: string, track?: Track): Promise<void> {
+  const chapterIndex = detail.chapters.indexOf(chapter);
+  const trackIndex = track ? chapter.tracks.indexOf(track) : undefined;
+  if (chapterIndex < 0 || trackIndex === -1) throw new Error("This track is no longer on the playlist.");
+  await window.yoto.playlists.setTitles(detail.cardId, [{ chapterIndex, trackIndex, title }]);
+  if (track) {
+    track.title = title;
+    if (chapter.tracks.length === 1) chapter.title = title;
+  } else {
+    chapter.title = title;
+    if (chapter.tracks.length === 1) chapter.tracks[0].title = title;
+  }
+}
+
+// Remove obsolete siblings first so inserting updated controls never detaches an editor.
+function replaceChildrenInPlace(target: HTMLElement, children: Node[]): void {
+  const keep = new Set(children);
+  for (const child of Array.from(target.childNodes)) {
+    if (!keep.has(child)) child.remove();
+  }
+  let cursor = target.firstChild;
+  for (const child of children) {
+    if (child !== cursor) target.insertBefore(child, cursor);
+    cursor = child.nextSibling;
+  }
+}
+
+function editingTrackList(target: HTMLElement): HTMLElement | null {
+  const tracks = target.querySelector<HTMLElement>(":scope > .tracks");
+  return tracks?.querySelector(".track-title-editing") ? tracks : null;
+}
+
+const trackRenderKeys = new WeakMap<object, string>();
+function trackRenderKey(track: object): string {
+  let key = trackRenderKeys.get(track);
+  if (!key) {
+    key = uid();
+    trackRenderKeys.set(track, key);
+  }
+  return key;
+}
+
+function updateTracksKeepingEdits(current: HTMLElement, next: HTMLElement): HTMLElement {
+  const previous = new Map(Array.from(current.children, (child) => [(child as HTMLElement).dataset.trackKey, child as HTMLElement]));
+  const children = Array.from(next.children, (child) => {
+    const replacement = child as HTMLElement;
+    const existing = replacement.dataset.trackKey ? previous.get(replacement.dataset.trackKey) : undefined;
+    if (!existing?.querySelector(".track-title-editing")) return replacement;
+    if (existing.classList.contains("track")) {
+      const title = existing.querySelector<HTMLElement>(".track-title-editing")!;
+      existing.className = replacement.className;
+      replaceChildrenInPlace(existing, Array.from(replacement.childNodes, (node) =>
+        node instanceof HTMLElement && node.classList.contains("track-title") ? title : node));
+    } else {
+      updateTracksKeepingEdits(existing, replacement);
+    }
+    return existing;
+  });
+  replaceChildrenInPlace(current, children);
+  return current;
+}
+
 function formatDuration(sec?: number): string {
   if (!sec || !isFinite(sec)) return "—";
   const m = Math.floor(sec / 60);
@@ -721,9 +847,13 @@ function renderFamilySidebar() {
 function renderDetail() {
   const target = document.getElementById("detail");
   if (!target) return;
-  target.innerHTML = "";
+  const editingTracks = editingTrackList(target);
+  for (const child of Array.from(target.childNodes)) {
+    if (child !== editingTracks) child.remove();
+  }
 
   if (!state.selectedCardId) {
+    target.replaceChildren();
     const startBtn = el("button", { class: "button-with-icon" }, lucideIcon(Plus, "button-icon", 16), "New playlist");
     startBtn.addEventListener("click", startOrFocusDraft);
     target.append(
@@ -742,6 +872,7 @@ function renderDetail() {
   const summary = state.summaries?.find((p) => p.cardId === state.selectedCardId);
 
   if (!detail) {
+    target.replaceChildren();
     target.append(
       el("div", { class: "detail-empty" }, el("p", {}, el("span", { class: "spinner" }), "Loading playlist…"))
     );
@@ -822,8 +953,6 @@ function renderDetail() {
     el("div", { class: "detail-header-text" }, title, meta)
   );
 
-  target.append(toolbar);
-
   const tracks = el("div", { class: "tracks" });
   if (detail.chapters.length === 0) {
     tracks.append(el("div", { class: "empty" }, "No tracks on this playlist."));
@@ -842,7 +971,7 @@ function renderDetail() {
         handle,
         iconSlot,
         el("span", { class: "track-num" }, String(i + 1).padStart(2, "0")),
-        el("span", { class: "track-title" }, rowTitle),
+        makeTrackTitle(rowTitle, editable ? (title) => renameTrack(detail, chapter, title) : undefined),
         el("span", { class: "track-duration" }, formatDuration(rowDuration)),
       ];
       if (editable) {
@@ -855,23 +984,23 @@ function renderDetail() {
       }
       const row = el(
         "div",
-        { class: "track has-handle has-icon" + (editable ? " has-delete" : ""), "data-idx": String(i) },
+        { class: "track has-handle has-icon" + (editable ? " has-delete" : ""), "data-idx": String(i), "data-track-key": trackRenderKey(chapter) },
         ...rowChildren
       );
       if (reorderable) wireDragRow(row, handle, detail);
       else handle.classList.add("hidden");
       tracks.append(row);
       if (isMulti) {
-        const sub = el("div", { class: "track-subs" });
+        const sub = el("div", { class: "track-subs", "data-track-key": `${trackRenderKey(chapter)}:subs` });
         chapter.tracks.forEach((t, j) => {
           sub.append(
             el(
               "div",
-              { class: "track track-sub has-handle has-icon" },
+              { class: "track track-sub has-handle has-icon", "data-track-key": trackRenderKey(t) },
               el("span", { class: "drag-handle drag-handle-spacer" }),
               el("span", { class: "track-icon track-icon-empty" }, emptyTrackIcon()),
               el("span", { class: "track-num" }, `${i + 1}.${j + 1}`),
-              el("span", { class: "track-title" }, t.title),
+              makeTrackTitle(t.title, editable ? (title) => renameTrack(detail, chapter, title, t) : undefined),
               el("span", { class: "track-duration" }, formatDuration(t.durationSec))
             )
           );
@@ -885,7 +1014,7 @@ function renderDetail() {
   const appending = state.appending.get(detail.cardId) ?? [];
   if (appending.length > 0) {
     const stillBusy = appending.some((t) => t.status === "queued" || isInFlight(t.status));
-    const appendingList = el("div", { class: "tracks tracks-appending" });
+    const appendingList = el("div", { class: "tracks tracks-appending", "data-track-key": `${detail.cardId}:appending` });
     appendingList.append(
       el(
         "div",
@@ -908,10 +1037,10 @@ function renderDetail() {
       appendingList.append(
         el(
           "div",
-          { class: "track has-icon" + (isErr ? " row-error" : isCancelled ? " row-cancelled" : "") },
+          { class: "track has-icon" + (isErr ? " row-error" : isCancelled ? " row-cancelled" : ""), "data-track-key": t.localId },
           el("span", { class: "track-icon track-icon-empty" }, emptyTrackIcon()),
           el("span", { class: "track-num" }, String(detail.chapters.length + j + 1).padStart(2, "0")),
-          el("span", { class: "track-title" }, t.title),
+          makeTrackTitle(t.title, editable ? (title) => { t.title = title; } : undefined),
           right
         )
       );
@@ -961,7 +1090,8 @@ function renderDetail() {
     );
   }
 
-  target.append(header, tracks, dropZone);
+  const trackList = editingTracks ? updateTracksKeepingEdits(editingTracks, tracks) : tracks;
+  replaceChildrenInPlace(target, [toolbar, header, trackList, dropZone]);
 
   if (summary && summary.title !== detail.title) {
     summary.title = detail.title;
@@ -1160,7 +1290,14 @@ function renderDraft() {
   const target = document.getElementById("detail");
   if (!target || !state.draft) return;
   const draft = state.draft;
-  target.innerHTML = "";
+  const currentHeader = target.querySelector<HTMLElement>(".detail-header");
+  const editingHeader = currentHeader?.querySelector(".detail-title-input") ? currentHeader : null;
+  const editingTracks = editingTrackList(target);
+  // Keep the focused input connected during upload updates, including its selection
+  // and any composition in progress. Only rebuild the surrounding draft controls.
+  for (const child of Array.from(target.childNodes)) {
+    if (child !== editingHeader && child !== editingTracks) child.remove();
+  }
 
   const cover = draft.coverMediaUrl
     ? (el("img", { class: "detail-cover detail-cover-clickable", src: draft.coverMediaUrl, alt: "", title: "Click to change cover" }))
@@ -1171,12 +1308,15 @@ function renderDraft() {
       );
   cover.addEventListener("click", () => pickAndUploadCoverForDraft());
 
-  const title = el("h1", { class: "detail-title", tabindex: "0", role: "textbox", title: "Click to rename" });
-  setDraftTitleDisplay(title, draft.title);
-  title.addEventListener("click", () => beginDraftRename(title));
-  title.addEventListener("keydown", (ev) => {
-    if ((ev as KeyboardEvent).key === "Enter") beginDraftRename(title);
-  });
+  const title = editingHeader?.querySelector<HTMLElement>(".detail-title")
+    ?? el("h1", { class: "detail-title", tabindex: "0", role: "textbox", title: "Click to rename" });
+  if (!editingHeader) {
+    setDraftTitleDisplay(title, draft.title);
+    title.addEventListener("click", () => beginDraftRename(title));
+    title.addEventListener("keydown", (ev) => {
+      if ((ev as KeyboardEvent).key === "Enter") beginDraftRename(title);
+    });
+  }
 
   const readyTracks = draft.tracks.filter((t) => t.status === "done").length;
   const totalTracks = draft.tracks.length;
@@ -1224,12 +1364,16 @@ function renderDraft() {
     publishBtn
   );
 
-  const header = el(
+  const header = editingHeader ?? el(
     "header",
     { class: "detail-header" },
     cover,
     el("div", { class: "detail-header-text" }, title, meta)
   );
+  if (editingHeader) {
+    editingHeader.querySelector(".detail-cover")!.replaceWith(cover);
+    editingHeader.querySelector(".detail-meta")!.replaceWith(meta);
+  }
 
   const tracks = el("div", { class: "tracks" });
   if (draft.tracks.length === 0) {
@@ -1273,10 +1417,10 @@ function renderDraft() {
 
       const row = el(
         "div",
-        { class: "track draft-track has-icon" + (isErr ? " row-error" : isCancelled ? " row-cancelled" : "") },
+        { class: "track draft-track has-icon" + (isErr ? " row-error" : isCancelled ? " row-cancelled" : ""), "data-track-key": t.localId },
         iconSlot,
         el("span", { class: "track-num" }, String(i + 1).padStart(2, "0")),
-        el("span", { class: "track-title" }, t.title),
+        makeTrackTitle(t.title, (title) => { t.title = title; }),
         right,
         removeBtn
       );
@@ -1301,10 +1445,11 @@ function renderDraft() {
     el("span", {}, "Drop audio files or a folder here")
   );
 
+  const trackList = editingTracks ? updateTracksKeepingEdits(editingTracks, tracks) : tracks;
+  replaceChildrenInPlace(target, [toolbar, header, trackList, dropzone]);
   if (draft.publishError) {
-    target.append(el("div", { class: "error banner" }, `Publish failed: ${draft.publishError}`));
+    target.prepend(el("div", { class: "error banner" }, `Publish failed: ${draft.publishError}`));
   }
-  target.append(toolbar, header, tracks, dropzone);
 }
 
 function setDraftTitleDisplay(titleEl: HTMLElement, text: string) {
@@ -1341,6 +1486,7 @@ function beginDraftRename(titleEl: HTMLElement) {
   input.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {
       ev.preventDefault();
+      ev.stopPropagation();
       input.blur();
     } else if (ev.key === "Escape") {
       committed = true;

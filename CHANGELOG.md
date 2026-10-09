@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Rename tracks inline using the pencil shown on hover, including draft tracks while they upload.
+- Keep playlist name editing focused while tracks are processing and uploading to Yoto.
+
 ## 0.3.2 — 2026-10-03
 
 Thanks to Emar for this release's contributions: ID3 title reading, the chapter-reorder fix (with test coverage), and a round of UI polish.
