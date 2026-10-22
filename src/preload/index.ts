@@ -141,7 +141,7 @@ const api = {
       ipcRenderer.invoke("playlists:deleteChapter", cardId, chapterKey),
     moveChapter: (sourceCardId: string, chapterKey: string, targetCardId: string): Promise<void> =>
       ipcRenderer.invoke("playlists:moveChapter", sourceCardId, chapterKey, targetCardId),
-    setTitles: (cardId: string, updates: Array<{ chapterIndex: number; title: string }>): Promise<void> =>
+    setTitles: (cardId: string, updates: Array<{ chapterIndex: number; trackIndex?: number; title: string }>): Promise<void> =>
       ipcRenderer.invoke("playlists:setTitles", cardId, updates),
     create: (input: {
       title: string;
