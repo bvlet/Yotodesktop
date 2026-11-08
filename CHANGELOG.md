@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Drag tracks to reorder new playlists before publishing, including while uploads are in progress.
+- Keep track reordering working after upload updates while renaming a track.
 - Rename tracks inline using the pencil shown on hover, including draft tracks while they upload.
 - Keep playlist name editing focused while tracks are processing and uploading to Yoto.
 

@@ -422,7 +422,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .track.has-handle.has-icon.has-delete { grid-template-columns: 18px 26px 32px 1fr auto 24px; }
 .track.has-handle:not(.has-icon) { grid-template-columns: 18px 32px 1fr auto; }
 .track.has-icon:not(.has-handle) { grid-template-columns: 26px 32px 1fr auto; }
-.track.draft-track.has-icon { grid-template-columns: 26px 32px 1fr auto 24px; }
+.track.draft-track.has-handle.has-icon { grid-template-columns: 18px 26px 32px 1fr auto 24px; }
 .track-icon {
   width: 24px;
   height: 24px;

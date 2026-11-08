@@ -11,7 +11,7 @@ import { build } from "esbuild";
 
 const require = createRequire(import.meta.url);
 
-test("playlist and track renaming in Electron", { timeout: 30_000 }, async () => {
+test("playlist and track renaming and reordering in Electron", { timeout: 30_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "yoto-draft-rename-"));
   try {
     const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");

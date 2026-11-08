@@ -466,9 +466,9 @@ function replaceChildrenInPlace(target: HTMLElement, children: Node[]): void {
   }
 }
 
-function editingTrackList(target: HTMLElement): HTMLElement | null {
+function activeTrackList(target: HTMLElement): HTMLElement | null {
   const tracks = target.querySelector<HTMLElement>(":scope > .tracks");
-  return tracks?.querySelector(".track-title-editing") ? tracks : null;
+  return tracks?.querySelector(".track-title-editing, .track.dragging") ? tracks : null;
 }
 
 const trackRenderKeys = new WeakMap<object, string>();
@@ -486,12 +486,13 @@ function updateTracksKeepingEdits(current: HTMLElement, next: HTMLElement): HTML
   const children = Array.from(next.children, (child) => {
     const replacement = child as HTMLElement;
     const existing = replacement.dataset.trackKey ? previous.get(replacement.dataset.trackKey) : undefined;
-    if (!existing?.querySelector(".track-title-editing")) return replacement;
+    if (!existing || (!existing.querySelector(".track-title-editing") && !existing.classList.contains("dragging"))) return replacement;
     if (existing.classList.contains("track")) {
-      const title = existing.querySelector<HTMLElement>(".track-title-editing")!;
-      existing.className = replacement.className;
+      const title = existing.querySelector<HTMLElement>(".track-title-editing");
+      existing.className = replacement.className + (existing.classList.contains("dragging") ? " dragging" : "");
+      if (replacement.dataset.idx !== undefined) existing.dataset.idx = replacement.dataset.idx;
       replaceChildrenInPlace(existing, Array.from(replacement.childNodes, (node) =>
-        node instanceof HTMLElement && node.classList.contains("track-title") ? title : node));
+        title && node instanceof HTMLElement && node.classList.contains("track-title") ? title : node));
     } else {
       updateTracksKeepingEdits(existing, replacement);
     }
@@ -847,7 +848,7 @@ function renderFamilySidebar() {
 function renderDetail() {
   const target = document.getElementById("detail");
   if (!target) return;
-  const editingTracks = editingTrackList(target);
+  const editingTracks = activeTrackList(target);
   for (const child of Array.from(target.childNodes)) {
     if (child !== editingTracks) child.remove();
   }
@@ -987,7 +988,7 @@ function renderDetail() {
         { class: "track has-handle has-icon" + (editable ? " has-delete" : ""), "data-idx": String(i), "data-track-key": trackRenderKey(chapter) },
         ...rowChildren
       );
-      if (reorderable) wireDragRow(row, handle, detail);
+      if (reorderable) wireDragRow(row, detail);
       else handle.classList.add("hidden");
       tracks.append(row);
       if (isMulti) {
@@ -1101,7 +1102,9 @@ function renderDetail() {
 }
 
 interface DragState {
-  sourceCardId: string;
+  sourceCardId: string | null;
+  sourceDraft?: Draft;
+  sourceTrackId?: string;
   sourceIndex: number;
   destinationIndex: number | null;
 }
@@ -1118,15 +1121,29 @@ function clearPlaylistDropTargets() {
   }
 }
 
-function wireDragRow(row: HTMLElement, handle: HTMLElement, detail: Playlist) {
-  handle.addEventListener("mousedown", () => row.setAttribute("draggable", "true"));
-  handle.addEventListener("mouseup", () => row.removeAttribute("draggable"));
+function wireDragRow(row: HTMLElement, source: Playlist | Draft) {
+  // Inline editors preserve the row while upload updates replace its handle.
+  // Delegate through the preserved row so the current handle always arms it.
+  row.addEventListener("mousedown", (ev) => {
+    if (ev.button === 0 && (ev.target as Element).closest(".drag-handle")) {
+      row.setAttribute("draggable", "true");
+    }
+  });
+  row.addEventListener("mouseup", () => row.removeAttribute("draggable"));
 
   row.addEventListener("dragstart", (ev) => {
     const idx = Number(row.dataset.idx);
-    drag = { sourceCardId: detail.cardId, sourceIndex: idx, destinationIndex: null };
+    if ("cardId" in source) {
+      drag = { sourceCardId: source.cardId, sourceIndex: idx, destinationIndex: null };
+    } else {
+      if (state.draft !== source || source.publishing) {
+        ev.preventDefault();
+        return;
+      }
+      drag = { sourceCardId: null, sourceDraft: source, sourceTrackId: row.dataset.trackKey, sourceIndex: idx, destinationIndex: null };
+    }
     row.classList.add("dragging");
-    ev.dataTransfer?.setData("text/plain", `${detail.cardId}:${idx}`);
+    ev.dataTransfer?.setData("text/plain", `${drag.sourceCardId ?? "draft"}:${idx}`);
     if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
   });
 
@@ -1142,7 +1159,7 @@ function wireDragRow(row: HTMLElement, handle: HTMLElement, detail: Playlist) {
 
 function wirePlaylistDropTarget(row: HTMLElement, target: PlaylistSummary) {
   row.addEventListener("dragover", (ev) => {
-    if (!drag || drag.sourceCardId === target.cardId || movingChapter) return;
+    if (!drag?.sourceCardId || drag.sourceCardId === target.cardId || movingChapter) return;
     ev.preventDefault();
     if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
     row.classList.add("drop-target");
@@ -1154,7 +1171,7 @@ function wirePlaylistDropTarget(row: HTMLElement, target: PlaylistSummary) {
 
   row.addEventListener("drop", (ev) => {
     ev.preventDefault();
-    if (!drag || drag.sourceCardId === target.cardId || movingChapter) return;
+    if (!drag?.sourceCardId || drag.sourceCardId === target.cardId || movingChapter) return;
     const sourceCardId = drag.sourceCardId;
     const sourceIndex = drag.sourceIndex;
     clearPlaylistDropTargets();
@@ -1163,12 +1180,14 @@ function wirePlaylistDropTarget(row: HTMLElement, target: PlaylistSummary) {
   });
 }
 
-function wireDropContainer(container: HTMLElement, detail: Playlist) {
-  const insertionLine = el("div", { class: "track-insertion-line", "aria-hidden": "true" });
-  container.append(insertionLine);
+function wireDropContainer(container: HTMLElement, source: Playlist | Draft) {
+  container.append(el("div", { class: "track-insertion-line", "aria-hidden": "true" }));
+  const acceptsDrag = () => drag && ("cardId" in source
+    ? drag.sourceCardId === source.cardId
+    : drag.sourceDraft === source && state.draft === source && !source.publishing);
 
   container.addEventListener("dragover", (ev) => {
-    if (!drag || drag.sourceCardId !== detail.cardId) return;
+    if (!drag || !acceptsDrag()) return;
     ev.preventDefault();
     if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
 
@@ -1181,7 +1200,7 @@ function wireDropContainer(container: HTMLElement, detail: Playlist) {
     for (let index = 0; index <= rows.length; index++) {
       const previous = rows[index - 1];
       const next = rows[index];
-      const previousEnd = previous?.nextElementSibling?.classList.contains("track-subs")
+      const previousEnd = previous?.nextElementSibling?.matches(".track-subs, .track-error-detail")
         ? previous.nextElementSibling : previous;
       const previousBottom = previousEnd?.getBoundingClientRect().bottom;
       const nextTop = next?.getBoundingClientRect().top;
@@ -1198,6 +1217,8 @@ function wireDropContainer(container: HTMLElement, detail: Playlist) {
 
     const sourceIdx = drag.sourceIndex;
     const isNoOp = destinationIndex === sourceIdx || destinationIndex === sourceIdx + 1;
+    // The container can survive an editor refresh with new child elements.
+    const insertionLine = container.querySelector<HTMLElement>(".track-insertion-line")!;
     insertionLine.classList.toggle("visible", !isNoOp);
     insertionLine.style.top = `${lineY - container.getBoundingClientRect().top}px`;
     drag.destinationIndex = isNoOp ? null : destinationIndex;
@@ -1208,11 +1229,24 @@ function wireDropContainer(container: HTMLElement, detail: Playlist) {
   });
 
   container.addEventListener("drop", (ev) => {
+    if (!acceptsDrag()) return;
     ev.preventDefault();
-    if (!drag) return;
     clearDropIndicators(container);
-    finalizeReorder(detail);
+    if ("cardId" in source) void finalizeReorder(source);
+    else finalizeDraftReorder(source);
   });
+}
+
+function finalizeDraftReorder(draft: Draft) {
+  const current = drag;
+  drag = null;
+  if (!current || current.sourceDraft !== draft || state.draft !== draft || draft.publishing || current.destinationIndex == null) return;
+  const sourceIndex = draft.tracks.findIndex((track) => track.localId === current.sourceTrackId);
+  if (sourceIndex < 0) return;
+  const destination = current.destinationIndex - (sourceIndex < current.destinationIndex ? 1 : 0);
+  const [track] = draft.tracks.splice(sourceIndex, 1);
+  draft.tracks.splice(destination, 0, track);
+  renderDraft();
 }
 
 async function moveChapterToPlaylist(sourceCardId: string, sourceIndex: number, target: PlaylistSummary) {
@@ -1292,7 +1326,7 @@ function renderDraft() {
   const draft = state.draft;
   const currentHeader = target.querySelector<HTMLElement>(".detail-header");
   const editingHeader = currentHeader?.querySelector(".detail-title-input") ? currentHeader : null;
-  const editingTracks = editingTrackList(target);
+  const editingTracks = activeTrackList(target);
   // Keep the focused input connected during upload updates, including its selection
   // and any composition in progress. Only rebuild the surrounding draft controls.
   for (const child of Array.from(target.childNodes)) {
@@ -1379,6 +1413,7 @@ function renderDraft() {
   if (draft.tracks.length === 0) {
     tracks.append(el("div", { class: "empty" }, "No tracks yet."));
   } else {
+    if (!draft.publishing) wireDropContainer(tracks, draft);
     draft.tracks.forEach((t, i) => {
       const isDone = t.status === "done";
       const isErr = t.status === "error";
@@ -1417,13 +1452,15 @@ function renderDraft() {
 
       const row = el(
         "div",
-        { class: "track draft-track has-icon" + (isErr ? " row-error" : isCancelled ? " row-cancelled" : ""), "data-track-key": t.localId },
+        { class: "track draft-track has-handle has-icon" + (isErr ? " row-error" : isCancelled ? " row-cancelled" : ""), "data-track-key": t.localId, "data-idx": String(i) },
+        el("span", { class: "drag-handle" + (draft.publishing ? " hidden" : ""), title: "Drag to reorder" }, gripIcon()),
         iconSlot,
         el("span", { class: "track-num" }, String(i + 1).padStart(2, "0")),
         makeTrackTitle(t.title, (title) => { t.title = title; }),
         right,
         removeBtn
       );
+      if (!draft.publishing) wireDragRow(row, draft);
       tracks.append(row);
 
       if (isErr && t.errorMessage) {

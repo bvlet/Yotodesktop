@@ -12,6 +12,7 @@ function installMockApi() {
   window.testCreatedPlaylists = [];
   window.testTitleUpdates = [];
   window.testAppendedTracks = [];
+  window.testReorders = [];
   window.testSavedPlaylists = {
     owned: { cardId: "owned", title: "Saved playlist", trackCount: 3, editable: true, chapters: [
       { key: "001", title: "Original song", tracks: [{ title: "Original song", durationSec: 65 }] },
@@ -46,6 +47,15 @@ function installMockApi() {
             if (chapter.tracks.length === 1) chapter.tracks[0].title = update.title;
           }
         }
+      },
+      reorder: async (cardId, order) => {
+        window.testReorders.push({ cardId, order });
+        if (window.testFailNextReorder) {
+          window.testFailNextReorder = false;
+          throw new Error("Test reorder failed");
+        }
+        const saved = window.testSavedPlaylists[cardId];
+        saved.chapters = order.map((index) => saved.chapters[index]);
       },
       appendTracks: async (cardId, tracks) => {
         window.testAppendedTracks.push({ cardId, tracks });
@@ -129,6 +139,45 @@ async function checkRenaming() {
   pressKey(cancelledTrackInput, "Escape");
   expect(document.querySelector(".draft-track .track-title-text").textContent === "Bird renamed", "Escape saved a cancelled track name");
 
+  const draftTitles = () => [...document.querySelectorAll(".draft-track .track-title-text")].map((node) => node.textContent);
+  const reorderDraft = (sourceIndex, destinationIndex, duringDrag) => {
+    const rows = [...document.querySelectorAll(".draft-track")];
+    const source = rows[sourceIndex];
+    const handle = source.querySelector(".drag-handle");
+    expect(handle, "Draft tracks have no reorder handle");
+    handle.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    expect(source.draggable, "Draft drag handle did not arm its track");
+    const transfer = new DataTransfer();
+    source.dispatchEvent(new DragEvent("dragstart", { dataTransfer: transfer, bubbles: true }));
+    duringDrag?.();
+    expect(source.isConnected && source.classList.contains("dragging"), "Upload update detached the dragged track");
+    const currentRows = [...document.querySelectorAll(".draft-track")];
+    const next = currentRows[destinationIndex];
+    const clientY = next ? next.getBoundingClientRect().top - 1 : currentRows.at(-1).getBoundingClientRect().bottom + 2;
+    const container = source.parentElement;
+    container.dispatchEvent(new DragEvent("dragover", { dataTransfer: transfer, clientY, bubbles: true, cancelable: true }));
+    const isNoOp = destinationIndex === sourceIndex || destinationIndex === sourceIndex + 1;
+    expect(container.querySelector(".track-insertion-line").classList.contains("visible") !== isNoOp,
+      "Draft insertion line does not match the drop position");
+    const sidebar = document.querySelector('.playlist[data-card="owned"]');
+    const sidebarOver = new DragEvent("dragover", { dataTransfer: transfer, bubbles: true, cancelable: true });
+    sidebar.dispatchEvent(sidebarOver);
+    expect(!sidebarOver.defaultPrevented && !sidebar.classList.contains("drop-target"), "Draft track offered a saved-playlist transfer");
+    container.dispatchEvent(new DragEvent("drop", { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    source.dispatchEvent(new DragEvent("dragend", { bubbles: true }));
+    expect(window.testReorders.length === 0, "Draft reorder called the saved-playlist API");
+  };
+  const originalOrder = draftTitles();
+  reorderDraft(0, 1);
+  expect(JSON.stringify(draftTitles()) === JSON.stringify(originalOrder), "Adjacent drop changed the draft order");
+  reorderDraft(0, 3, () => window.testUploads[1].onStage("hashing"));
+  expect(draftTitles().at(-1) === "Bird renamed", "Draft track did not move to the end");
+  window.testUploads[0].onStage("uploading");
+  expect(draftTitles().at(-1) === "Bird renamed", "Upload progress reset the draft order");
+  expect(document.querySelectorAll(".draft-track .track-status")[2].textContent === "Uploading…", "Upload progress updated the wrong track after reordering");
+  reorderDraft(2, 0);
+  expect(JSON.stringify(draftTitles()) === JSON.stringify(originalOrder), "Draft track did not move back to the start");
+
   const input = startRename("Bedtime songs");
   for (const stage of ["transcoding-local", "hashing", "uploading", "transcoding-server", "done"]) {
     window.testUploads[0].onStage(stage);
@@ -173,13 +222,17 @@ async function checkRenaming() {
   pressKey(emptyInput, "Enter");
   expect(title().querySelector(".detail-title-text").textContent === "Final playlist name", "Empty edit erased the name");
 
+  reorderDraft(1, 0);
+  expect(draftTitles()[0] === "Second", "Ready draft tracks could not be reordered");
+
   const publish = [...document.querySelectorAll(".detail-toolbar button")].find((button) => button.textContent === "Publish to Yoto");
   expect(!publish.disabled, "Publish did not become available after uploads stopped");
   publish.click();
   await waitFor(() => window.testCreatedPlaylists.length === 1);
   expect(window.testCreatedPlaylists[0].title === "Final playlist name", "Publishing used the wrong name");
   expect(window.testCreatedPlaylists[0].tracks.length === 2, "Publishing lost completed tracks");
-  expect(window.testCreatedPlaylists[0].tracks[0].title === "Bird renamed", "Publishing lost the edited draft track name");
+  expect(window.testCreatedPlaylists[0].tracks[0].title === "Second" && window.testCreatedPlaylists[0].tracks[1].title === "Bird renamed",
+    "Publishing lost the draft order or edited track name");
 }
 
 async function checkSavedTrackRenaming() {
@@ -248,8 +301,36 @@ async function checkSavedTrackRenaming() {
   expect(document.querySelector('.track[data-idx="0"] input') === whileUploading && document.activeElement === whileUploading,
     "Appending upload replaced the saved track editor");
   expect(whileUploading.selectionStart === 2 && whileUploading.selectionEnd === 8, "Appending upload lost cursor selection");
+  const preservedRow = document.querySelector('.track[data-idx="0"]');
+  preservedRow.querySelector('.drag-handle').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+  expect(preservedRow.draggable, "Updated handle no longer arms its visible track for dragging");
+  const reorderTransfer = new DataTransfer();
+  preservedRow.dispatchEvent(new DragEvent('dragstart', { dataTransfer: reorderTransfer, bubbles: true }));
+  const trackList = preservedRow.parentElement;
+  const lastRow = trackList.querySelector('.track[data-idx="1"]');
+  const subRows = lastRow.nextElementSibling;
+  trackList.dispatchEvent(new DragEvent('dragover', {
+    dataTransfer: reorderTransfer, bubbles: true, cancelable: true,
+    clientY: subRows.getBoundingClientRect().bottom + 2,
+  }));
+  expect(trackList.querySelector('.track-insertion-line').classList.contains('visible'),
+    "Updated track list lost its drag insertion line");
+  preservedRow.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
   pressKey(whileUploading, "Enter");
   await waitFor(() => !row.querySelector("input"));
+  preservedRow.querySelector('.drag-handle svg').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+  expect(preservedRow.draggable, "Dragging from the grip icon did not arm the track");
+  preservedRow.dispatchEvent(new DragEvent('dragstart', { dataTransfer: reorderTransfer, bubbles: true }));
+  trackList.dispatchEvent(new DragEvent('dragover', {
+    dataTransfer: reorderTransfer, bubbles: true, cancelable: true,
+    clientY: subRows.getBoundingClientRect().bottom + 2,
+  }));
+  trackList.dispatchEvent(new DragEvent('drop', { dataTransfer: reorderTransfer, bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitFor(() => window.testReorders.length === 1 && document.querySelector('.track[data-idx="0"] .track-title-text')?.textContent === "Chapter");
+  expect(JSON.stringify(window.testReorders[0]) === JSON.stringify({ cardId: "owned", order: [1, 0] }),
+    "Drop did not persist the expected chapter order");
+  expect(window.testSavedPlaylists.owned.chapters[1].title === "Name during upload", "Reordering lost the edited name");
 
   const appendingRow = document.querySelectorAll(".tracks-appending .track")[1];
   const appendingInput = start(appendingRow, "New appended song");
@@ -261,8 +342,33 @@ async function checkSavedTrackRenaming() {
   finish(window.testUploads[previousUploads + 1]);
   await waitFor(() => [...document.querySelectorAll("button")].some((button) => button.textContent === "Save to playlist"));
   [...document.querySelectorAll("button")].find((button) => button.textContent === "Save to playlist").click();
-  await waitFor(() => window.testAppendedTracks.length === 1);
+  await waitFor(() => window.testAppendedTracks.length === 1 && document.querySelectorAll('#detail > .tracks > .track').length === 4);
   expect(window.testAppendedTracks[0].tracks[1].title === "New appended song", "Appending lost the edited track name");
+
+  const chapterTitles = () => [...document.querySelectorAll('#detail > .tracks > .track .track-title-text')].map((title) => title.textContent);
+  const beforeReorder = chapterTitles();
+  const dragLastToStart = () => {
+    const rows = document.querySelectorAll('#detail > .tracks > .track');
+    const last = rows[rows.length - 1];
+    const container = last.parentElement;
+    const transfer = new DataTransfer();
+    last.querySelector('.drag-handle').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    last.dispatchEvent(new DragEvent('dragstart', { dataTransfer: transfer, bubbles: true }));
+    container.dispatchEvent(new DragEvent('dragover', { dataTransfer: transfer, bubbles: true, cancelable: true,
+      clientY: rows[0].getBoundingClientRect().top - 2 }));
+    expect(container.querySelector('.track-insertion-line').classList.contains('visible'), "Missing insertion line before first track");
+    container.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+  };
+  const reorderCount = window.testReorders.length;
+  window.testFailNextReorder = true;
+  dragLastToStart();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitFor(() => window.testReorders.length === reorderCount + 1 && document.querySelector('.error.banner'));
+  expect(JSON.stringify(chapterTitles()) === JSON.stringify(beforeReorder), "Failed reorder did not restore the previous order");
+  dragLastToStart();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitFor(() => window.testReorders.length === reorderCount + 2 && chapterTitles()[0] === beforeReorder.at(-1));
+  expect(JSON.stringify(window.testReorders.at(-1).order) === JSON.stringify([3, 0, 1, 2]), "Moving to the start saved the wrong order");
 
   document.querySelector('.playlist[data-card="family"]').click();
   await waitFor(() => document.querySelector(".detail-readonly-note"));
@@ -352,6 +458,7 @@ async function checkMainTitleWrites() {
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, nodeIntegration: false } });
   window.webContents.session.webRequest.onBeforeRequest({ urls: ["http://*/*", "https://*/*"] }, (_details, callback) => callback({ cancel: true }));
+  window.webContents.on('render-process-gone', (_event, details) => { console.error(details); app.exit(1); });
   await window.loadFile(join(directory, "index.html"));
   await window.webContents.executeJavaScript(`(${installMockApi.toString()})()`);
   await window.webContents.executeJavaScript(await readFile(join(directory, "renderer.js"), "utf8"));
